@@ -26,9 +26,10 @@ def request(path, data=None, method=None, headers=None, expected=200):
         return payload
 
 
-def upload(filename, content, expected=202):
+def upload(filename, content, expected=202, mode='demo'):
     boundary = uuid.uuid4().hex
-    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="mode"\r\n\r\n{mode}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
             'Content-Type: video/mp4\r\n\r\n').encode() + content + f'\r\n--{boundary}--\r\n'.encode()
     return json.loads(request('/api/jobs', body, 'POST', {'Content-Type': f'multipart/form-data; boundary={boundary}'}, expected))
 
@@ -64,8 +65,8 @@ def verify_video(path, expected_duration):
 
 
 config = json.loads(request('/api/config'))
-if config['mode'] != 'demo':
-    raise RuntimeError('smoke test requires AI_MODE=demo')
+assert {'split', 'demo'} <= set(config['available_modes']), config
+assert config['min_video_seconds'] == 15 and config['min_clip_seconds'] == 5, config
 with tempfile.TemporaryDirectory(prefix='clipforge-smoke-') as directory:
     root = Path(directory)
     source = root / 'source.mp4'
@@ -86,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='clipforge-smoke-') as directory:
         assert len(request(endpoint, headers={'Range': 'bytes=0-31'}, expected=206)) == 32
     clip = job['clips'][0]
     old_paths = [c['path'] for c in job['clips']]
-    request(f"/api/jobs/{job['id']}/clips/{clip['id']}", json.dumps({'start': 0, 'end': 5}).encode(),
+    request(f"/api/jobs/{job['id']}/clips/{clip['id']}", json.dumps({'start': 0, 'end': 4}).encode(),
             'PATCH', {'Content-Type': 'application/json'}, expected=400)
     request(f"/api/jobs/{job['id']}/clips/{clip['id']}", json.dumps({'start': 1, 'end': 21}).encode(),
             'PATCH', {'Content-Type': 'application/json'}, expected=202)
@@ -104,4 +105,21 @@ with tempfile.TemporaryDirectory(prefix='clipforge-smoke-') as directory:
     assert cancelled['status'] == 'cancelled'
     request(f"/api/jobs/{second['id']}/retry", b'', 'POST')
     wait_job(second['id'])
-    print(f'Smoke passed: three clips, re-export, byte ranges, cancel/retry. {base}/#{job["id"]}')
+    short = root / 'short.mp4'
+    subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-y', '-i', str(source), '-t', '15',
+                    '-c:v', 'libx264', '-threads', '2', '-preset', 'ultrafast', '-an', str(short)], check=True)
+    split = wait_job(upload('short.mp4', short.read_bytes(), mode='split')['id'])
+    assert split['mode'] == 'split' and not split['transcript'] and len(split['clips']) == 3, split
+    for index, clip in enumerate(split['clips']):
+        assert abs(clip['start'] - index * 5) < 0.1 and abs(clip['end'] - (index + 1) * 5) < 0.1, clip
+        path = root / f"split-{index}.mp4"
+        path.write_bytes(request(f"/api/jobs/{split['id']}/clips/{clip['id']}/video"))
+        info = json.loads(subprocess.check_output([ffprobe, '-v', 'error', '-show_entries',
+                                                  'format=duration:stream=codec_type', '-of', 'json', str(path)]))
+        assert abs(float(info['format']['duration']) - 5) < 0.2, info
+        assert all(stream['codec_type'] != 'audio' for stream in info['streams']), info
+    request(f"/api/jobs/{job['id']}/reprocess", json.dumps({'mode': 'split'}).encode(),
+            'POST', {'Content-Type': 'application/json'}, expected=202)
+    reprocessed = wait_job(job['id'])
+    assert reprocessed['mode'] == 'split' and not reprocessed['transcript'] and len(reprocessed['clips']) == 3, reprocessed
+    print(f'Smoke passed: demo, silent 15s split, reprocess, re-export, byte ranges, cancel/retry. {base}/#{split["id"]}')
