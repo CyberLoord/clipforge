@@ -1,0 +1,48 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: clipforge
+          POSTGRES_PASSWORD: clipforge
+          POSTGRES_DB: clipforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clipforge -d clipforge_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - run: go test -race -count=1 ./... && go vet ./...
+        env:
+          TEST_DATABASE_URL: postgres://clipforge:clipforge@localhost:5432/clipforge_test?sslmode=disable
+          MEDIA_TEST: "1"
+      - run: pnpm install --frozen-lockfile && pnpm test && pnpm build
+        working-directory: web
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: docker compose up --build --wait --wait-timeout 180
+      - run: bash scripts/smoke.sh
+      - if: always()
+        run: docker compose logs --no-color && docker compose down -v
