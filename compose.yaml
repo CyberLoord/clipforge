@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATABASE_URL: postgres://clipforge:clipforge@db:5432/clipforge?sslmode=disable
+      AI_MODE: ${AI_MODE:-demo}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_SELECTION_MODEL: ${OPENAI_SELECTION_MODEL:-gpt-4.1-mini}
+      WORKERS: ${WORKERS:-2}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-300}
+      MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-1800}
+      MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
+      STAGE_TIMEOUT: ${STAGE_TIMEOUT:-15m}
+      LEASE_DURATION: ${LEASE_DURATION:-30s}
+    volumes:
+      - media:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: clipforge
+      POSTGRES_USER: clipforge
+      POSTGRES_PASSWORD: clipforge
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipforge -d clipforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  media:
+  postgres:
