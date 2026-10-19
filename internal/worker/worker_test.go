@@ -58,6 +58,9 @@ type fakeMedia struct {
 	probeDuration    float64
 	paths            []string
 	renderedSegments int
+	samples          int
+	montages         int
+	renderedCuts     [][]domain.Cut
 }
 
 func (m *fakeMedia) Probe(context.Context, string) (domain.Info, error) {
@@ -72,6 +75,17 @@ func (m *fakeMedia) Probe(context.Context, string) (domain.Info, error) {
 func (m *fakeMedia) Extract(_ context.Context, _, output string) error {
 	m.extracts++
 	return os.WriteFile(output, []byte("audio"), 0600)
+}
+
+func (m *fakeMedia) SampleFrames(context.Context, string, float64) ([]domain.Frame, error) {
+	m.samples++
+	return []domain.Frame{{Time: 1, JPEG: []byte("jpeg")}, {Time: 10, JPEG: []byte("jpeg")}}, nil
+}
+
+func (m *fakeMedia) RenderMontage(ctx context.Context, input, output string, cuts []domain.Cut) error {
+	m.montages++
+	m.renderedCuts = append(m.renderedCuts, append([]domain.Cut(nil), cuts...))
+	return m.Render(ctx, input, output, nil, domain.Clip{})
 }
 
 func (m *fakeMedia) Render(ctx context.Context, _, output string, segments []domain.Segment, _ domain.Clip) error {
@@ -121,7 +135,7 @@ func (a *fakeAI) Select(context.Context, []domain.Segment, float64) ([]domain.Cl
 
 func testWorker(t *testing.T, queue *fakeQueue, media *fakeMedia, provider *fakeAI) *Worker {
 	t.Helper()
-	return New(queue, media, provider, provider, Config{
+	return New(queue, media, provider, provider, nil, Config{
 		DataDir: t.TempDir(), LeaseDuration: time.Second, StageTimeout: time.Second,
 		MaxDuration: 1800, MaxAttempts: 3, Workers: 1,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -245,7 +259,7 @@ func TestReexportPreservesPublishedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.process(context.Background(), lease)
-	if media.renders != 1 || len(queue.completed) != 2 || queue.completed[1] != old {
+	if media.renders != 1 || len(queue.completed) != 2 || !reflect.DeepEqual(queue.completed[1], old) {
 		t.Fatalf("reexport rerendered published clips: renders=%d, clips=%+v", media.renders, queue.completed)
 	}
 	if _, err := os.Stat(oldPath); err != nil {
@@ -344,6 +358,8 @@ func TestCleanupKeepsCurrentLeaseAndPublishedOutput(t *testing.T) {
 		{name: ".render-clip-1-" + lease.Token + ".mp4-123.mp4", keep: true},
 		{name: ".subtitles-clip-1-" + lease.PreviousToken + ".mp4-123", directory: true},
 		{name: ".subtitles-clip-1-" + lease.Token + ".mp4-123", directory: true, keep: true},
+		{name: ".montage-clip-1-" + lease.PreviousToken + ".mp4-123", directory: true},
+		{name: ".montage-clip-1-" + lease.Token + ".mp4-123", directory: true, keep: true},
 		{name: "unrelated", directory: true, keep: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {

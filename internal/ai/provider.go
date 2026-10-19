@@ -17,6 +17,10 @@ type Selector interface {
 	Select(context.Context, []domain.Segment, float64) ([]domain.Clip, error)
 }
 
+type MontageSelector interface {
+	SelectMontages(context.Context, []domain.Frame, float64) ([]domain.Clip, error)
+}
+
 type APIError struct {
 	Status int
 }

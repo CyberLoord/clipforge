@@ -1,4 +1,4 @@
-export type Mode = "split" | "openai" | "demo";
+export type Mode = "montage" | "split" | "openai" | "demo";
 
 export interface Config {
   mode: Mode;
@@ -16,6 +16,13 @@ export interface Segment {
   text: string;
 }
 
+export type EditStyle = "dynamic" | "cinematic" | "story";
+
+export interface Cut {
+  start: number;
+  end: number;
+}
+
 export interface Clip {
   id: string;
   start: number;
@@ -24,6 +31,8 @@ export interface Clip {
   reason: string;
   path: string;
   revision: number;
+  style?: EditStyle;
+  cuts?: Cut[];
 }
 
 export type JobStatus =

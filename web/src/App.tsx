@@ -207,7 +207,7 @@ export function App() {
             <Icon name="scissors" size={17} />
           </span>
           <div>
-            Личная мастерская<span>Видео → фрагменты</span>
+            Личная мастерская<span>Видео → эдиты</span>
           </div>
           <span className="version">v0.1</span>
         </div>
@@ -217,11 +217,11 @@ export function App() {
           <div>
             <span className="breadcrumb-root">Мастерская</span>
             <span className="breadcrumb-separator">/</span>
-            <span>{selectedID ? "Фрагменты" : "Новое видео"}</span>
+            <span>{selectedID ? "Результаты" : "Новое видео"}</span>
           </div>
           <span className="mode-label">
             <span
-              className={`status-dot ${currentJob?.mode === "openai" ? "connected" : ""}`}
+              className={`status-dot ${currentJob?.mode === "openai" || currentJob?.mode === "montage" ? "connected" : ""}`}
             />
             {currentJob
               ? modeLabels[currentJob.mode]

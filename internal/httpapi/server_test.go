@@ -64,6 +64,8 @@ func TestUploadModes(t *testing.T) {
 		{"split", "split", "", false, 202},
 		{"demo", "demo", "", false, 202},
 		{"openai", "openai", "test-key", false, 202},
+		{"montage", "montage", "test-key", false, 202},
+		{"montage missing key", "montage", "", false, 503},
 		{"missing key", "openai", "", false, 503},
 		{"unknown mode", "unknown", "", false, 400},
 		{"mode after file", "split", "", true, 400},
@@ -122,6 +124,8 @@ func TestReprocess(t *testing.T) {
 	}{
 		{"split", `{"mode":"split"}`, "", "application/json", nil, 202},
 		{"openai", `{"mode":"openai"}`, "test-key", "application/json", nil, 202},
+		{"montage", `{"mode":"montage"}`, "test-key", "application/json", nil, 202},
+		{"montage missing key", `{"mode":"montage"}`, "", "application/json", nil, 503},
 		{"missing key", `{"mode":"openai"}`, "", "application/json", nil, 503},
 		{"invalid mode", `{"mode":"invalid"}`, "", "application/json", nil, 400},
 		{"unknown field", `{"mode":"split","extra":true}`, "", "application/json", nil, 400},

@@ -23,6 +23,7 @@ type Config struct {
 	APIKey         string
 	BaseURL        string
 	Model          string
+	VisionModel    string
 	FFmpeg         string
 	FFprobe        string
 	Workers        int
@@ -43,10 +44,11 @@ func Load() (Config, error) {
 		DataDir:     env("DATA_DIR", "data"),
 		WebDir:      env("WEB_DIR", "web/dist"),
 		Migrations:  env("MIGRATIONS_DIR", "migrations"),
-		Mode:        env("AI_MODE", "split"),
+		Mode:        env("AI_MODE", "montage"),
 		APIKey:      os.Getenv("OPENAI_API_KEY"),
 		BaseURL:     env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		Model:       env("OPENAI_SELECTION_MODEL", "gpt-4.1-mini"),
+		VisionModel: env("OPENAI_VISION_MODEL", "gpt-5.6-terra"),
 		FFmpeg:      env("FFMPEG_PATH", "ffmpeg"),
 		FFprobe:     env("FFPROBE_PATH", "ffprobe"),
 	}
@@ -73,11 +75,8 @@ func Load() (Config, error) {
 	if c.LeaseDuration, err = time.ParseDuration(env("LEASE_DURATION", "30s")); err != nil || c.LeaseDuration < 3*time.Second {
 		return c, fmt.Errorf("LEASE_DURATION must be at least 3s")
 	}
-	if c.Mode != "split" && c.Mode != "demo" && c.Mode != "openai" {
-		return c, fmt.Errorf("AI_MODE must be split, demo or openai")
-	}
-	if c.Mode == "openai" && c.APIKey == "" {
-		return c, fmt.Errorf("OPENAI_API_KEY is required in openai mode")
+	if c.Mode != "montage" && c.Mode != "split" && c.Mode != "demo" && c.Mode != "openai" {
+		return c, fmt.Errorf("AI_MODE must be montage, split, demo or openai")
 	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
@@ -103,7 +102,7 @@ func integer(key string, fallback, min, max int) (int, error) {
 func (c Config) AvailableModes() []string {
 	modes := []string{"split"}
 	if c.APIKey != "" {
-		modes = append(modes, "openai")
+		modes = append(modes, "montage", "openai")
 	}
 	return append(modes, "demo")
 }

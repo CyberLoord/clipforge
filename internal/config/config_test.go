@@ -10,7 +10,7 @@ import (
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	for _, name := range []string{"ADDR", "DATABASE_URL", "DATA_DIR", "WEB_DIR", "MIGRATIONS_DIR", "AI_MODE", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_SELECTION_MODEL", "FFMPEG_PATH", "FFPROBE_PATH", "WORKERS", "MAX_ATTEMPTS", "MAX_UPLOAD_MB", "MAX_DURATION_SECONDS", "STAGE_TIMEOUT", "LEASE_DURATION"} {
+	for _, name := range []string{"ADDR", "DATABASE_URL", "DATA_DIR", "WEB_DIR", "MIGRATIONS_DIR", "AI_MODE", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_SELECTION_MODEL", "OPENAI_VISION_MODEL", "FFMPEG_PATH", "FFPROBE_PATH", "WORKERS", "MAX_ATTEMPTS", "MAX_UPLOAD_MB", "MAX_DURATION_SECONDS", "STAGE_TIMEOUT", "LEASE_DURATION"} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
@@ -28,10 +28,10 @@ func TestLoadDotEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.APIKey != "test-key" || cfg.Workers != 3 || cfg.MaxDuration != 15 || cfg.Mode != "split" {
+	if cfg.APIKey != "test-key" || cfg.Workers != 3 || cfg.MaxDuration != 15 || cfg.Mode != "montage" || cfg.VisionModel != "gpt-5.6-terra" {
 		t.Fatal("dotenv settings or environment precedence are incorrect")
 	}
-	if !reflect.DeepEqual(cfg.AvailableModes(), []string{"split", "openai", "demo"}) {
+	if !reflect.DeepEqual(cfg.AvailableModes(), []string{"split", "montage", "openai", "demo"}) {
 		t.Fatal("configured provider is unavailable")
 	}
 }
@@ -42,7 +42,7 @@ func TestLoadWithoutDotEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "split" || !reflect.DeepEqual(cfg.AvailableModes(), []string{"split", "demo"}) {
+	if cfg.Mode != "montage" || !reflect.DeepEqual(cfg.AvailableModes(), []string{"split", "demo"}) {
 		t.Fatal("unexpected default modes")
 	}
 }

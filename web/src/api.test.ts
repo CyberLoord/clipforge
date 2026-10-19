@@ -12,7 +12,7 @@ test("upload sends the selected mode before the streamed file", async () => {
     upload = {};
     responseType = "";
     status = 202;
-    response = { id: "job", mode: "split" };
+    response = { id: "job", mode: "montage" };
     onload?: () => void;
     open(method: string, url: string) {
       assert.equal(method, "POST");
@@ -30,9 +30,9 @@ test("upload sends the selected mode before the streamed file", async () => {
   });
   try {
     const file = new File(["video"], "short.mp4", { type: "video/mp4" });
-    await uploadVideo(file, "split", () => {}).promise;
+    await uploadVideo(file, "montage", () => {}).promise;
     assert.deepEqual([...submitted!.keys()], ["mode", "file"]);
-    assert.equal(submitted!.get("mode"), "split");
+    assert.equal(submitted!.get("mode"), "montage");
     assert.equal((submitted!.get("file") as File).name, "short.mp4");
   } finally {
     if (previous) Object.defineProperty(globalThis, "XMLHttpRequest", previous);

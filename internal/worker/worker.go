@@ -21,6 +21,8 @@ type Media interface {
 	Probe(context.Context, string) (domain.Info, error)
 	Extract(context.Context, string, string) error
 	Render(context.Context, string, string, []domain.Segment, domain.Clip) error
+	SampleFrames(context.Context, string, float64) ([]domain.Frame, error)
+	RenderMontage(context.Context, string, string, []domain.Cut) error
 }
 
 type Queue interface {
@@ -46,11 +48,12 @@ type Worker struct {
 	media       Media
 	transcriber ai.Transcriber
 	selector    ai.Selector
+	montage     ai.MontageSelector
 	cfg         Config
 	log         *slog.Logger
 }
 
-func New(queue Queue, media Media, transcriber ai.Transcriber, selector ai.Selector, cfg Config, logger *slog.Logger) *Worker {
+func New(queue Queue, media Media, transcriber ai.Transcriber, selector ai.Selector, montage ai.MontageSelector, cfg Config, logger *slog.Logger) *Worker {
 	if cfg.Workers < 1 {
 		cfg.Workers = 1
 	}
@@ -72,7 +75,7 @@ func New(queue Queue, media Media, transcriber ai.Transcriber, selector ai.Selec
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Worker{queue: queue, media: media, transcriber: transcriber, selector: selector, cfg: cfg, log: logger}
+	return &Worker{queue: queue, media: media, transcriber: transcriber, selector: selector, montage: montage, cfg: cfg, log: logger}
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -213,9 +216,9 @@ func (w *Worker) cleanupAbandoned(job domain.Job, previousToken string) {
 		if !strings.Contains(entry.Name(), "-"+previousToken) {
 			continue
 		}
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".subtitles-") {
+		if entry.IsDir() && (strings.HasPrefix(entry.Name(), ".subtitles-") || strings.HasPrefix(entry.Name(), ".montage-")) {
 			if err := os.RemoveAll(path); err != nil {
-				w.log.Warn("abandoned subtitles cleanup failed", "job_id", job.ID, "error", err)
+				w.log.Warn("abandoned render cleanup failed", "job_id", job.ID, "error", err)
 			}
 			continue
 		}
@@ -256,6 +259,8 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		provider := ai.NewDemo()
 		transcriber, selector = provider, provider
 	case "openai":
+	case "montage":
+		job.Transcript = []domain.Segment{}
 	default:
 		return fmt.Errorf("unsupported processing mode %q", job.Mode)
 	}
@@ -270,11 +275,11 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		}
 		job.Duration = info.Duration
 		job.Stage = "transcribe"
-		if job.Mode == "split" {
+		if job.Mode == "split" || job.Mode == "montage" {
 			job.Stage = "select"
 		}
 	case "transcribe":
-		if job.Mode == "split" {
+		if job.Mode == "split" || job.Mode == "montage" {
 			job.Stage = "select"
 			return nil
 		}
@@ -304,6 +309,29 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		job.Transcript = segments
 		job.Stage = "select"
 	case "select":
+		if job.Mode == "montage" {
+			if w.montage == nil {
+				return errors.New("Для выбора кадров нужен OPENAI_API_KEY. Добавьте ключ и перезапустите приложение.")
+			}
+			frames, err := w.media.SampleFrames(ctx, job.SourcePath, job.Duration)
+			if err != nil {
+				return err
+			}
+			clips, err := w.montage.SelectMontages(ctx, frames, job.Duration)
+			if err != nil {
+				return err
+			}
+			if err := domain.ValidateMontages(clips, job.Duration); err != nil {
+				return err
+			}
+			for i := range clips {
+				clips[i].ID = domain.NewID()
+				clips[i].Revision = 1
+				clips[i].Path = ""
+			}
+			job.Clips, job.Stage = clips, "render"
+			return nil
+		}
 		if selector == nil {
 			return errors.New("OpenAI не настроен: добавьте OPENAI_API_KEY и перезапустите сервис либо выберите автоматическую нарезку без AI")
 		}
@@ -322,12 +350,18 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		job.Clips = clips
 		job.Stage = "render"
 	case "render":
-		if err := domain.ValidateClips(job.Clips, job.Duration); err != nil {
-			return err
-		}
-		if job.Mode != "split" {
-			if err := domain.ValidateSegments(job.Transcript, job.Duration); err != nil {
+		if job.Mode == "montage" {
+			if err := domain.ValidateMontages(job.Clips, job.Duration); err != nil {
 				return err
+			}
+		} else {
+			if err := domain.ValidateClips(job.Clips, job.Duration); err != nil {
+				return err
+			}
+			if job.Mode != "split" {
+				if err := domain.ValidateSegments(job.Transcript, job.Duration); err != nil {
+					return err
+				}
 			}
 		}
 		for i := range job.Clips {
@@ -341,7 +375,13 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 				return err
 			}
 			*outputs = append(*outputs, path)
-			if err := w.media.Render(ctx, job.SourcePath, path, job.Transcript, *clip); err != nil {
+			var err error
+			if job.Mode == "montage" {
+				err = w.media.RenderMontage(ctx, job.SourcePath, path, clip.Cuts)
+			} else {
+				err = w.media.Render(ctx, job.SourcePath, path, job.Transcript, *clip)
+			}
+			if err != nil {
 				return err
 			}
 			clip.Path = filepath.ToSlash(relative)

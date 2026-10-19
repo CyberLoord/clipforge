@@ -181,6 +181,11 @@ func atomicOutput(path, extension string, write func(string) error) error {
 }
 
 func run(ctx context.Context, binary, dir string, stdout io.Writer, args ...string) error {
+	_, err := runWithLog(ctx, binary, dir, stdout, args...)
+	return err
+}
+
+func runWithLog(ctx context.Context, binary, dir string, stdout io.Writer, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir, cmd.Stdout = dir, stdout
 	stderr := &limitedBuffer{limit: 8 << 10}
@@ -188,11 +193,11 @@ func run(ctx context.Context, binary, dir string, stdout io.Writer, args ...stri
 	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("%s: %w", filepath.Base(binary), ctx.Err())
+			return "", fmt.Errorf("%s: %w", filepath.Base(binary), ctx.Err())
 		}
-		return fmt.Errorf("%s: %w: %s", filepath.Base(binary), err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("%s: %w: %s", filepath.Base(binary), err, strings.TrimSpace(stderr.String()))
 	}
-	return nil
+	return stderr.String(), nil
 }
 
 type limitedBuffer struct {

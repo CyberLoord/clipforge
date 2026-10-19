@@ -135,7 +135,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	mode := s.cfg.Mode
 	if mode == "" {
-		mode = "split"
+		mode = "montage"
 	}
 	part, err := reader.NextPart()
 	if err == nil && part.FormName() == "mode" && part.FileName() == "" {
@@ -250,11 +250,11 @@ func (s *Server) modeAllowed(w http.ResponseWriter, mode string) bool {
 	switch mode {
 	case "split", "demo":
 		return true
-	case "openai":
+	case "openai", "montage":
 		if s.cfg.APIKey != "" {
 			return true
 		}
-		s.fail(w, 503, "Для анализа речи добавьте OPENAI_API_KEY в .env и перезапустите приложение.")
+		s.fail(w, 503, "Для анализа видео добавьте OPENAI_API_KEY в .env и перезапустите приложение.")
 	default:
 		s.fail(w, 400, "unknown processing mode")
 	}
@@ -298,6 +298,10 @@ func (s *Server) reprocess(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reexport(w http.ResponseWriter, r *http.Request) {
 	job, ok := s.job(w, r)
 	if !ok {
+		return
+	}
+	if job.Mode == "montage" {
+		s.fail(w, 409, "Эдит состоит из нескольких сцен. Для нового варианта используйте повторную обработку.")
 		return
 	}
 	var body struct {

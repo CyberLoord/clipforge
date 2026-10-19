@@ -7,6 +7,7 @@ import {
   timestamp,
   validateBounds,
 } from "../timing";
+import { clipDuration, cutInterval, editStyleLabels } from "../montage";
 import { Icon } from "./Icon";
 
 export function ClipCard({
@@ -33,7 +34,9 @@ export function ClipCard({
   const [error, setError] = useState("");
   const video = useRef<HTMLVideoElement>(null);
   const videoURL = `/api/jobs/${encodeURIComponent(job.id)}/clips/${encodeURIComponent(clip.id)}/video`;
-  const canEdit = job.status === "completed";
+  const montage = job.mode === "montage";
+  const cuts = clip.cuts ?? [];
+  const canEdit = job.status === "completed" && !montage;
   const ready = Boolean(clip.path);
 
   useEffect(() => {
@@ -49,6 +52,7 @@ export function ClipCard({
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (!canEdit) return;
     const parsedStart = parseEditedTimestamp(start, clip.start);
     const parsedEnd = parseEditedTimestamp(end, clip.end);
     const validation = validateBounds(
@@ -112,10 +116,15 @@ export function ClipCard({
         )}
         <span className="clip-index">{String(index + 1).padStart(2, "0")}</span>
         <span className="clip-duration">
-          {timestamp(clip.end - clip.start)}
+          {montage
+            ? editableTimestamp(clipDuration(clip))
+            : timestamp(clipDuration(clip))}
         </span>
       </div>
       <div className="clip-body">
+        {montage && clip.style && (
+          <p className="edit-style">{editStyleLabels[clip.style]}</p>
+        )}
         <button
           className="clip-heading"
           onClick={onSelect}
@@ -124,15 +133,29 @@ export function ClipCard({
           <h3>{clip.title}</h3>
         </button>
         <p className="clip-reason">{clip.reason}</p>
-        <button
-          className="clip-timestamp"
-          onClick={onSelect}
-          aria-label={`${job.mode === "split" ? "Выбрать фрагмент" : "Показать текст фрагмента"} с ${timestamp(clip.start)} по ${timestamp(clip.end)}`}
-        >
-          <Icon name="clock" size={14} />
-          {timestamp(clip.start)} — {timestamp(clip.end)}
-          <span>в исходнике</span>
-        </button>
+        {montage ? (
+          <details className="edit-cuts">
+            <summary>Сцены: {cuts.length} · Порядок монтажа</summary>
+            <p>Временные метки в исходном видео</p>
+            <ol>
+              {cuts.map((cut, cutIndex) => (
+                <li key={`${cutIndex}-${cut.start}-${cut.end}`}>
+                  {cutInterval(cut)}
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : (
+          <button
+            className="clip-timestamp"
+            onClick={onSelect}
+            aria-label={`${job.mode === "split" ? "Выбрать фрагмент" : "Показать текст фрагмента"} с ${timestamp(clip.start)} по ${timestamp(clip.end)}`}
+          >
+            <Icon name="clock" size={14} />
+            {timestamp(clip.start)} — {timestamp(clip.end)}
+            <span>в исходнике</span>
+          </button>
+        )}
         <div className="clip-actions">
           {ready && (
             <a
@@ -158,7 +181,7 @@ export function ClipCard({
             </button>
           )}
         </div>
-        {editing && (
+        {editing && canEdit && (
           <form className="bounds-form" onSubmit={save}>
             <div className="bounds-inputs">
               <label>

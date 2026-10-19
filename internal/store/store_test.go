@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -253,7 +254,7 @@ func TestReexportPreservesOtherClips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != "queued" || got.Stage != "render" || got.Clips[0].Start != 10 || got.Clips[0].End != 35 || got.Clips[0].Revision != 2 || got.Clips[0].Path != "" || got.Clips[1] != clips[1] {
+	if got.Status != "queued" || got.Stage != "render" || got.Clips[0].Start != 10 || got.Clips[0].End != 35 || got.Clips[0].Revision != 2 || got.Clips[0].Path != "" || !reflect.DeepEqual(got.Clips[1], clips[1]) {
 		t.Fatalf("unexpected reexport: %+v", got)
 	}
 	if err := s.Reexport(ctx, job.ID, "two", 50, 75); !errors.Is(err, ErrConflict) {

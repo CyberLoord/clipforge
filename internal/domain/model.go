@@ -20,6 +20,16 @@ type Segment struct {
 	Text  string  `json:"text"`
 }
 
+type Frame struct {
+	Time float64
+	JPEG []byte
+}
+
+type Cut struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
 type Clip struct {
 	ID       string  `json:"id"`
 	Start    float64 `json:"start"`
@@ -28,6 +38,8 @@ type Clip struct {
 	Reason   string  `json:"reason"`
 	Path     string  `json:"path"`
 	Revision int     `json:"revision"`
+	Style    string  `json:"style,omitempty"`
+	Cuts     []Cut   `json:"cuts,omitempty"`
 }
 
 type Job struct {

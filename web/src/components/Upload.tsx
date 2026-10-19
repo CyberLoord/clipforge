@@ -17,11 +17,13 @@ export function Upload({
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
-  const [mode, setMode] = useState(() => initialMode(config));
+  const [mode, setMode] = useState(() => initialMode());
   const input = useRef<HTMLInputElement>(null);
   const operation = useRef<{ abort: () => void } | null>(null);
   const dragDepth = useRef(0);
   const mounted = useRef(true);
+  const available = availableModes(config).includes(mode);
+  const montage = mode === "montage";
   const maxMB = Math.round(config.max_upload_bytes / 1024 / 1024);
   const maxMinutes = Math.round(config.max_duration_seconds / 60);
 
@@ -49,8 +51,7 @@ export function Upload({
   }
 
   async function submit() {
-    if (!file || progress !== null || !availableModes(config).includes(mode))
-      return;
+    if (!file || progress !== null || !available) return;
     setError("");
     setProgress(0);
     const upload = uploadVideo(file, mode, setProgress);
@@ -76,14 +77,16 @@ export function Upload({
       <h1>
         Ваше видео.
         <br />
-        <span>Короткие фрагменты.</span>
+        <span>{montage ? "Несколько эдитов." : "Короткие фрагменты."}</span>
       </h1>
       <p className="intro">
-        {mode === "split"
-          ? "Видео до 135 секунд делится на три равные части. Для более длинного — три фрагмента по 45 секунд. В клипах сохраняется исходный звук."
-          : mode === "openai"
-            ? "Загрузите запись с речью. Clipforge распознает текст, выберет до трёх фрагментов по смыслу и добавит субтитры."
-            : "Проверка экспорта на вашем видео с готовой тестовой расшифровкой."}
+        {montage
+          ? "Clipforge выбирает интересные моменты по кадрам и склеивает их в короткие ролики. Из одного видео — несколько вариантов монтажа."
+          : mode === "split"
+            ? "Видео до 135 секунд делится на три равные части. Для более длинного — три фрагмента по 45 секунд. В клипах сохраняется исходный звук."
+            : mode === "openai"
+              ? "Загрузите запись с речью. Clipforge распознает текст, выберет до трёх фрагментов по смыслу и добавит субтитры."
+              : "Проверка экспорта на вашем видео с готовой тестовой расшифровкой."}
       </p>
       <ModePicker
         config={config}
@@ -156,8 +159,12 @@ export function Upload({
               {!file && <Icon name="plus" size={18} />}
             </button>
             {file && (
-              <button className="button primary" onClick={submit}>
-                Нарезать видео
+              <button
+                className="button primary"
+                onClick={submit}
+                disabled={!available}
+              >
+                {montage ? "Создать эдиты" : "Нарезать видео"}
                 <Icon name="arrow" size={18} />
               </button>
             )}
@@ -191,43 +198,58 @@ export function Upload({
         <div>
           <span className="step-number">01</span>
           <h3>
-            {mode === "openai"
-              ? "Речь в текст"
-              : mode === "split"
-                ? "Проверка видео"
-                : "Тестовый текст"}
+            {montage
+              ? "Анализ кадров"
+              : mode === "openai"
+                ? "Речь в текст"
+                : mode === "split"
+                  ? "Проверка видео"
+                  : "Тестовый текст"}
           </h3>
           <p>
-            {mode === "openai"
-              ? "Расшифровка с временными метками."
-              : mode === "split"
-                ? `Исходник от ${config.min_video_seconds ?? 15} секунд. Распознавание речи не требуется.`
-                : "Готовая расшифровка для проверки субтитров."}
+            {montage
+              ? "Оцениваем сцены, движение и композицию."
+              : mode === "openai"
+                ? "Расшифровка с временными метками."
+                : mode === "split"
+                  ? `Исходник от ${config.min_video_seconds ?? 15} секунд. Распознавание речи не требуется.`
+                  : "Готовая расшифровка для проверки субтитров."}
           </p>
         </div>
         <div>
           <span className="step-number">02</span>
           <h3>
-            {mode === "openai" ? "Выбор по смыслу" : "3 фрагмента по времени"}
+            {montage
+              ? "Несколько вариантов"
+              : mode === "openai"
+                ? "Выбор по смыслу"
+                : "3 фрагмента по времени"}
           </h3>
           <p>
-            Длина фрагмента: {config.min_clip_seconds}–{config.max_clip_seconds}{" "}
-            секунд.
+            {montage
+              ? "Разный темп, выбор и порядок моментов."
+              : `Длина фрагмента: ${config.min_clip_seconds}–${config.max_clip_seconds} секунд.`}
           </p>
         </div>
         <div>
           <span className="step-number">03</span>
           <h3>Готовый MP4</h3>
-          <p>Формат 9:16. Границы можно изменить.</p>
+          <p>
+            {montage
+              ? "Склеенные сцены, исходный звук. Каждый вариант можно скачать."
+              : "Формат 9:16. Границы можно изменить."}
+          </p>
         </div>
       </div>
       <p className="upload-footnote">
         <Icon name="film" size={16} />{" "}
-        {mode === "openai"
-          ? "Для анализа речи подойдёт интервью, лекция или разговор с одной основной речевой дорожкой."
-          : mode === "split"
-            ? "Нарезка по времени не анализирует содержание. После экспорта границы каждого фрагмента можно изменить."
-            : "Демо проверяет экспорт и субтитры. Для распознавания настоящей речи выберите режим «По речи · AI»."}
+        {montage
+          ? "Работает и без речи. Качество выбора зависит от исходника; анализируются отдельные кадры видео."
+          : mode === "openai"
+            ? "Для анализа речи подойдёт интервью, лекция или разговор с одной основной речевой дорожкой."
+            : mode === "split"
+              ? "Нарезка по времени не анализирует содержание. После экспорта границы каждого фрагмента можно изменить."
+              : "Демо проверяет экспорт и субтитры. Для распознавания настоящей речи выберите режим «По речи · AI»."}
       </p>
     </section>
   );

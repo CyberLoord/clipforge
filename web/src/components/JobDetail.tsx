@@ -53,12 +53,30 @@ export function JobDetail({
   const [selectedClip, setSelectedClip] = useState<string | null>(null);
   const [showAllText, setShowAllText] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
-  const [nextMode, setNextMode] = useState(() => initialMode(config));
+  const [nextMode, setNextMode] = useState(() => initialMode());
+  const montage = job.mode === "montage";
   const clips = job.clips ?? [];
   const transcript = job.transcript ?? [];
   const active = job.status === "running" || job.status === "queued";
-  const stages =
-    job.mode === "split"
+  const stages = montage
+    ? [
+        {
+          id: "probe",
+          label: "Проверка видео",
+          detail: "Проверяем исходник и готовим кадры для анализа.",
+        },
+        {
+          id: "select",
+          label: "Анализ кадров",
+          detail: "Выбираем моменты и составляем несколько вариантов монтажа.",
+        },
+        {
+          id: "render",
+          label: "Монтаж",
+          detail: "Склеиваем выбранные сцены в отдельные MP4.",
+        },
+      ]
+    : job.mode === "split"
       ? [
           speechStages[0],
           {
@@ -202,7 +220,7 @@ export function JobDetail({
             </button>
           </div>
           <ol
-            className={`stage-list ${job.mode === "split" ? "split-stages" : ""}`}
+            className={`stage-list ${stages.length === 3 ? "split-stages" : ""}`}
           >
             {stages.map((stage, index) => (
               <li
@@ -261,7 +279,7 @@ export function JobDetail({
       {!active && (
         <section className="reprocess-panel">
           <div className="reprocess-heading">
-            <p>Новая нарезка из сохранённого видео</p>
+            <p>Создать эдиты из сохранённого видео</p>
             <button
               className="button secondary small"
               onClick={() => setReprocessing(!reprocessing)}
@@ -269,7 +287,7 @@ export function JobDetail({
               disabled={!!action}
             >
               <Icon name="scissors" size={15} />
-              Нарезать заново
+              {montage ? "Собрать заново" : "Создать эдиты"}
             </button>
           </div>
           {reprocessing && (
@@ -282,7 +300,7 @@ export function JobDetail({
               />
               {nextMode === "demo" && <DemoNotice />}
               <p className="reprocess-hint">
-                Текущие фрагменты будут заменены. Исходный файл сохранится.
+                Текущие результаты будут заменены. Исходный файл сохранится.
               </p>
               <div className="reprocess-actions">
                 <button
@@ -292,7 +310,11 @@ export function JobDetail({
                     !!action || !availableModes(config).includes(nextMode)
                   }
                 >
-                  {action === "reprocess" ? "Запускаем…" : "Начать нарезку"}
+                  {action === "reprocess"
+                    ? "Запускаем…"
+                    : nextMode === "montage"
+                      ? "Создать эдиты"
+                      : "Начать нарезку"}
                   <Icon name="arrow" size={15} />
                 </button>
                 <button
@@ -316,17 +338,19 @@ export function JobDetail({
         <div className="section-heading">
           <div>
             <h2>
-              Фрагменты{" "}
+              {montage ? "Варианты эдита" : "Фрагменты"}{" "}
               <span className="count">
                 {clips.length.toString().padStart(2, "0")}
               </span>
             </h2>
             <p>
-              {job.mode === "split"
-                ? "3 фрагмента по времени · Исходный звук · Без субтитров"
-                : job.mode === "demo"
-                  ? "Вертикальные видео с тестовыми субтитрами · MP4"
-                  : "Фрагменты по смыслу с субтитрами · MP4"}
+              {montage
+                ? "Монтаж выбранных сцен · Исходный звук · MP4"
+                : job.mode === "split"
+                  ? "3 фрагмента по времени · Исходный звук · Без субтитров"
+                  : job.mode === "demo"
+                    ? "Вертикальные видео с тестовыми субтитрами · MP4"
+                    : "Фрагменты по смыслу с субтитрами · MP4"}
             </p>
           </div>
           {job.status === "completed" && (
@@ -360,21 +384,29 @@ export function JobDetail({
               <Icon name="scissors" size={24} />
             </div>
             <h3>
-              {active ? "Фрагменты появятся здесь" : "Пока нет фрагментов"}
+              {montage
+                ? active
+                  ? "Эдиты появятся здесь"
+                  : "Пока нет эдитов"
+                : active
+                  ? "Фрагменты появятся здесь"
+                  : "Пока нет фрагментов"}
             </h3>
             <p>
               {active
-                ? job.mode === "split"
-                  ? "Проверим видео и нарежем его на три отдельных фрагмента."
-                  : job.mode === "demo"
-                    ? "Подготовим тестовый текст и проверим экспорт."
-                    : "Сначала получим расшифровку и выберем подходящие отрывки."
-                : "Для создания фрагментов нужно завершить обработку видео."}
+                ? montage
+                  ? "Выберем моменты по кадрам и соберём варианты монтажа."
+                  : job.mode === "split"
+                    ? "Проверим видео и нарежем его на три отдельных фрагмента."
+                    : job.mode === "demo"
+                      ? "Подготовим тестовый текст и проверим экспорт."
+                      : "Сначала получим расшифровку и выберем подходящие отрывки."
+                : "Завершите обработку, чтобы получить готовые видео."}
             </p>
           </div>
         )}
       </section>
-      {job.mode !== "split" && (
+      {(job.mode === "openai" || job.mode === "demo") && (
         <section className="transcript-section">
           <div className="section-heading">
             <div>

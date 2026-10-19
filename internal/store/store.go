@@ -157,7 +157,7 @@ func (s *Store) Retry(ctx context.Context, id string) error {
 
 func (s *Store) Reprocess(ctx context.Context, id, mode string) error {
 	switch mode {
-	case "split", "demo", "openai":
+	case "split", "demo", "openai", "montage":
 	default:
 		return fmt.Errorf("%w: unsupported processing mode", ErrConflict)
 	}
@@ -181,7 +181,7 @@ func (s *Store) Reexport(ctx context.Context, id, clipID string, start, end floa
 	if err != nil {
 		return err
 	}
-	if job.Status != "completed" {
+	if job.Status != "completed" || job.Mode == "montage" {
 		return ErrConflict
 	}
 	found := false
