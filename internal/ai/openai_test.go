@@ -96,7 +96,7 @@ func TestSelectionRejectsMalformedData(t *testing.T) {
 	for _, response := range []string{
 		`{}`, `{"choices":[]}`, `{"choices":[{"finish_reason":"length","message":{"content":"{}"}}]}`,
 		`{"choices":[{"finish_reason":"stop","message":{"refusal":"declined","content":"{}"}}]}`,
-		selectionResponse(`{"clips":[{"start":0,"end":14.999,"title":"t","reason":"r"}]}`),
+		selectionResponse(`{"clips":[{"start":0,"end":4.999,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"start":0,"end":61,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"end":25,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"start":0,"end":25,"title":"t","reason":"r","extra":true}]}`),
@@ -111,6 +111,21 @@ func TestSelectionRejectsMalformedData(t *testing.T) {
 				t.Fatalf("expected permanent validation error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestSelectionAllowsShortExcerpts(t *testing.T) {
+	for _, content := range []string{
+		`{"clips":[{"start":0,"end":6,"title":"Одна мысль","reason":"Законченный ответ"}]}`,
+		`{"clips":[{"start":0,"end":5,"title":"Первая","reason":"Начало"},{"start":5,"end":10,"title":"Вторая","reason":"Пример"},{"start":10,"end":17.642667,"title":"Третья","reason":"Вывод"}]}`,
+	} {
+		server := responseServer(selectionResponse(content), http.StatusOK)
+		defer server.Close()
+		transcript := []domain.Segment{{Start: 0, End: 17.642667, Text: "Короткая расшифровка"}}
+		clips, err := NewOpenAI("test", server.URL, "test").Select(context.Background(), transcript, 17.642667)
+		if err != nil || len(clips) == 0 {
+			t.Fatalf("short selection rejected: clips=%v error=%v", clips, err)
+		}
 	}
 }
 
@@ -161,11 +176,11 @@ func TestDemoDurationBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("duration=%g: %v", duration, err)
 		}
-		if len(clips) == 0 || !strings.Contains(segments[0].Text, "Демо") {
+		if len(clips) != 3 || !strings.Contains(segments[0].Text, "Демо") {
 			t.Fatalf("invalid demo: %v", clips)
 		}
-		if duration < 30 && (len(clips) != 1 || clips[0].Start != 0 || clips[0].End != duration) {
-			t.Fatalf("short demo should use the whole video: duration=%g clips=%v", duration, clips)
+		if duration < 30 && (clips[0].Start != 0 || clips[2].End != duration || clips[0].End >= duration) {
+			t.Fatalf("short demo should produce three excerpts: duration=%g clips=%v", duration, clips)
 		}
 	}
 }
@@ -177,7 +192,7 @@ func TestDemoRejectsVideoBelowMinimum(t *testing.T) {
 	}
 	segments := []domain.Segment{{Start: 0, End: 14.999, Text: "Демо"}}
 	if _, err := demo.Select(context.Background(), segments, 14.999); err == nil {
-		t.Fatal("selected a clip shorter than 15 seconds")
+		t.Fatal("accepted source video shorter than 15 seconds")
 	}
 }
 

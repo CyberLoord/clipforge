@@ -39,7 +39,6 @@ type Config struct {
 	MaxAttempts   int
 	MaxDuration   float64
 	DataDir       string
-	Mode          string
 }
 
 type Worker struct {
@@ -248,8 +247,17 @@ func (w *Worker) cleanupTemp(id, previousToken string) {
 }
 
 func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, outputs *[]string) error {
-	if (job.Stage == "transcribe" || job.Stage == "select") && w.cfg.Mode != "" && job.Mode != w.cfg.Mode {
-		return fmt.Errorf("job uses %s mode; restart the service in that mode before retrying", job.Mode)
+	transcriber, selector := w.transcriber, w.selector
+	switch job.Mode {
+	case "split":
+		transcriber, selector = nil, ai.NewSplitter()
+		job.Transcript = []domain.Segment{}
+	case "demo":
+		provider := ai.NewDemo()
+		transcriber, selector = provider, provider
+	case "openai":
+	default:
+		return fmt.Errorf("unsupported processing mode %q", job.Mode)
 	}
 	switch job.Stage {
 	case "probe":
@@ -257,12 +265,22 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		if err != nil {
 			return err
 		}
-		if math.IsNaN(info.Duration) || math.IsInf(info.Duration, 0) || info.Duration < domain.MinClipSeconds || info.Duration > w.cfg.MaxDuration {
-			return fmt.Errorf("длительность видео — %.2f с; допустимо от %d до %.0f с", info.Duration, domain.MinClipSeconds, w.cfg.MaxDuration)
+		if math.IsNaN(info.Duration) || math.IsInf(info.Duration, 0) || info.Duration < domain.MinVideoSeconds || info.Duration > w.cfg.MaxDuration {
+			return fmt.Errorf("длительность видео — %.2f с; допустимо от %d до %.0f с", info.Duration, domain.MinVideoSeconds, w.cfg.MaxDuration)
 		}
 		job.Duration = info.Duration
 		job.Stage = "transcribe"
+		if job.Mode == "split" {
+			job.Stage = "select"
+		}
 	case "transcribe":
+		if job.Mode == "split" {
+			job.Stage = "select"
+			return nil
+		}
+		if transcriber == nil {
+			return errors.New("OpenAI не настроен: добавьте OPENAI_API_KEY и перезапустите сервис либо выберите автоматическую нарезку без AI")
+		}
 		tempDir := filepath.Join(w.cfg.DataDir, "tmp")
 		if err := os.MkdirAll(tempDir, 0700); err != nil {
 			return err
@@ -276,7 +294,7 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		if err = w.media.Extract(ctx, job.SourcePath, audio); err != nil {
 			return err
 		}
-		segments, err := w.transcriber.Transcribe(ctx, audio, job.Duration)
+		segments, err := transcriber.Transcribe(ctx, audio, job.Duration)
 		if err != nil {
 			return err
 		}
@@ -286,7 +304,10 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		job.Transcript = segments
 		job.Stage = "select"
 	case "select":
-		clips, err := w.selector.Select(ctx, job.Transcript, job.Duration)
+		if selector == nil {
+			return errors.New("OpenAI не настроен: добавьте OPENAI_API_KEY и перезапустите сервис либо выберите автоматическую нарезку без AI")
+		}
+		clips, err := selector.Select(ctx, job.Transcript, job.Duration)
 		if err != nil {
 			return err
 		}
@@ -304,8 +325,10 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		if err := domain.ValidateClips(job.Clips, job.Duration); err != nil {
 			return err
 		}
-		if err := domain.ValidateSegments(job.Transcript, job.Duration); err != nil {
-			return err
+		if job.Mode != "split" {
+			if err := domain.ValidateSegments(job.Transcript, job.Duration); err != nil {
+				return err
+			}
 		}
 		for i := range job.Clips {
 			clip := &job.Clips[i]

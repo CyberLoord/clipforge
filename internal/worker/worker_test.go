@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,12 +51,13 @@ func (q *fakeQueue) Fail(_ context.Context, _ store.Lease, message string, retry
 }
 
 type fakeMedia struct {
-	probes        int
-	extracts      int
-	renders       int
-	blockRender   bool
-	probeDuration float64
-	paths         []string
+	probes           int
+	extracts         int
+	renders          int
+	blockRender      bool
+	probeDuration    float64
+	paths            []string
+	renderedSegments int
 }
 
 func (m *fakeMedia) Probe(context.Context, string) (domain.Info, error) {
@@ -72,8 +74,9 @@ func (m *fakeMedia) Extract(_ context.Context, _, output string) error {
 	return os.WriteFile(output, []byte("audio"), 0600)
 }
 
-func (m *fakeMedia) Render(ctx context.Context, _, output string, _ []domain.Segment, _ domain.Clip) error {
+func (m *fakeMedia) Render(ctx context.Context, _, output string, segments []domain.Segment, _ domain.Clip) error {
 	m.renders++
+	m.renderedSegments += len(segments)
 	m.paths = append(m.paths, output)
 	if err := os.WriteFile(output, []byte("video"), 0600); err != nil {
 		return err
@@ -126,7 +129,7 @@ func testWorker(t *testing.T, queue *fakeQueue, media *fakeMedia, provider *fake
 
 func testLease(stage string) store.Lease {
 	return store.Lease{Token: domain.NewID(), Job: domain.Job{
-		ID: domain.NewID(), Stage: stage, Status: "running", Mode: "demo", Attempts: 1,
+		ID: domain.NewID(), Stage: stage, Status: "running", Mode: "openai", Attempts: 1,
 		SourcePath: "/source.mp4", Duration: 90,
 		Transcript: []domain.Segment{{Start: 0, End: 30, Text: "Example transcript."}},
 		Clips:      []domain.Clip{{ID: domain.NewID(), Start: 0, End: 30, Title: "Example", Reason: "Complete thought.", Revision: 1}},
@@ -253,14 +256,70 @@ func TestReexportPreservesPublishedFiles(t *testing.T) {
 	}
 }
 
-func TestModeCannotChangeBetweenStages(t *testing.T) {
+func TestUnsupportedModeIsRejected(t *testing.T) {
 	queue := &fakeQueue{}
 	provider := &fakeAI{}
 	w := testWorker(t, queue, &fakeMedia{}, provider)
-	w.cfg.Mode = "openai"
-	w.process(context.Background(), testLease("transcribe"))
+	lease := testLease("transcribe")
+	lease.Job.Mode = "unknown"
+	w.process(context.Background(), lease)
 	if queue.failure == "" || queue.retry || provider.transcribes != 0 {
-		t.Fatalf("mode mismatch accepted: %+v", queue)
+		t.Fatalf("unsupported mode accepted: %+v", queue)
+	}
+}
+
+func TestSplitSkipsSpeechProvidersAndSubtitles(t *testing.T) {
+	queue, media, provider := &fakeQueue{}, &fakeMedia{probeDuration: 15}, &fakeAI{err: errors.New("must not be called")}
+	w := testWorker(t, queue, media, provider)
+	lease := testLease("probe")
+	lease.Job.Mode = "split"
+	w.process(context.Background(), lease)
+	if queue.failure != "" || !reflect.DeepEqual(queue.stages, []string{"select", "render"}) || len(queue.completed) != 3 {
+		t.Fatalf("split did not complete: %+v", queue)
+	}
+	if media.extracts != 0 || provider.transcribes != 0 || provider.selects != 0 || media.renderedSegments != 0 {
+		t.Fatalf("split invoked a speech provider or added subtitles: media=%+v provider=%+v", media, provider)
+	}
+	for _, clip := range queue.completed {
+		if clip.End-clip.Start != 5 {
+			t.Fatalf("15-second video did not produce 5-second clips: %+v", clip)
+		}
+	}
+}
+
+func TestDemoUsesItsOwnProviders(t *testing.T) {
+	queue, media, provider := &fakeQueue{}, &fakeMedia{}, &fakeAI{err: errors.New("must not be called")}
+	w := testWorker(t, queue, media, provider)
+	lease := testLease("probe")
+	lease.Job.Mode = "demo"
+	w.process(context.Background(), lease)
+	if queue.failure != "" || len(queue.completed) != 3 || provider.transcribes != 0 || provider.selects != 0 || media.renderedSegments == 0 {
+		t.Fatalf("demo did not use its own providers: queue=%+v media=%+v provider=%+v", queue, media, provider)
+	}
+	for _, clip := range queue.completed {
+		if !strings.Contains(clip.Title, "Демо") {
+			t.Fatalf("demo clip is not marked: %+v", clip)
+		}
+	}
+}
+
+func TestOpenAIRequiresConfiguredProviderOnlyForAIStages(t *testing.T) {
+	for _, stage := range []string{"transcribe", "select", "render"} {
+		t.Run(stage, func(t *testing.T) {
+			queue, media := &fakeQueue{}, &fakeMedia{}
+			w := testWorker(t, queue, media, &fakeAI{})
+			w.transcriber, w.selector = nil, nil
+			w.process(context.Background(), testLease(stage))
+			if stage == "render" {
+				if queue.failure != "" || len(queue.completed) != 1 {
+					t.Fatalf("saved render required an API key: %+v", queue)
+				}
+				return
+			}
+			if !strings.Contains(queue.failure, "OPENAI_API_KEY") || queue.retry || len(queue.completed) != 0 || media.extracts != 0 || media.renders != 0 {
+				t.Fatalf("missing provider was not rejected before processing: queue=%+v media=%+v", queue, media)
+			}
+		})
 	}
 }
 

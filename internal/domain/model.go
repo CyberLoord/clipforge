@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-const MinClipSeconds = 15
+const MinVideoSeconds = 15
+const MinClipSeconds = 5
 const MaxClipSeconds = 60
 
 type Segment struct {

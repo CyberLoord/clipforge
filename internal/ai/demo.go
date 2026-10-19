@@ -26,7 +26,7 @@ func (d *Demo) Transcribe(ctx context.Context, _ string, duration float64) ([]do
 		"Субтитры показываются по временным меткам.",
 		"Границы клипа можно изменить перед повторным экспортом.",
 	}
-	if math.IsNaN(duration) || math.IsInf(duration, 0) || duration < domain.MinClipSeconds || duration > 24*60*60 {
+	if math.IsNaN(duration) || math.IsInf(duration, 0) || duration < domain.MinVideoSeconds || duration > 24*60*60 {
 		return nil, fmt.Errorf("invalid demo duration: %g", duration)
 	}
 	segments := make([]domain.Segment, 0, int(duration/5)+1)
@@ -43,18 +43,13 @@ func (d *Demo) Select(ctx context.Context, segments []domain.Segment, duration f
 	if err := domain.ValidateSegments(segments, duration); err != nil {
 		return nil, err
 	}
-	count := min(3, int(duration/domain.MinClipSeconds))
-	if count < 1 {
-		return nil, fmt.Errorf("video must last at least %d seconds", domain.MinClipSeconds)
+	clips, err := NewSplitter().Select(ctx, nil, duration)
+	if err != nil {
+		return nil, err
 	}
-	length := math.Min(45, duration/float64(count))
-	clips := make([]domain.Clip, 0, count)
-	for i := 0; i < count; i++ {
-		start := float64(i) * length
-		if count > 1 {
-			start = float64(i) * (duration - length) / float64(count-1)
-		}
-		clips = append(clips, domain.Clip{Start: start, End: math.Min(start+length, duration), Title: fmt.Sprintf("Демо-фрагмент %d", i+1), Reason: "Границы выбраны автоматически для проверки экспорта, без анализа содержания."})
+	for i := range clips {
+		clips[i].Title = fmt.Sprintf("Демо-фрагмент %d", i+1)
+		clips[i].Reason = "Границы выбраны автоматически для проверки экспорта, без анализа содержания."
 	}
-	return clips, domain.ValidateClips(clips, duration)
+	return clips, nil
 }

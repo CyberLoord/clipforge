@@ -66,16 +66,12 @@ func run(logger *slog.Logger) error {
 	repo := store.New(pool)
 	var transcriber ai.Transcriber
 	var selector ai.Selector
-	if cfg.Mode == "openai" {
+	if cfg.APIKey != "" {
 		provider := ai.NewOpenAI(cfg.APIKey, cfg.BaseURL, cfg.Model)
 		transcriber = provider
 		selector = provider
-	} else {
-		provider := ai.NewDemo()
-		transcriber = provider
-		selector = provider
 	}
-	jobs := worker.New(repo, media.New(cfg.FFmpeg, cfg.FFprobe), transcriber, selector, worker.Config{Mode: cfg.Mode, Workers: cfg.Workers, LeaseDuration: cfg.LeaseDuration, PollInterval: time.Second, StageTimeout: cfg.StageTimeout, MaxAttempts: cfg.MaxAttempts, MaxDuration: cfg.MaxDuration, DataDir: cfg.DataDir}, logger)
+	jobs := worker.New(repo, media.New(cfg.FFmpeg, cfg.FFprobe), transcriber, selector, worker.Config{Workers: cfg.Workers, LeaseDuration: cfg.LeaseDuration, PollInterval: time.Second, StageTimeout: cfg.StageTimeout, MaxAttempts: cfg.MaxAttempts, MaxDuration: cfg.MaxDuration, DataDir: cfg.DataDir}, logger)
 	workersDone := make(chan struct{})
 	go func() { defer close(workersDone); jobs.Run(ctx) }()
 	server := &http.Server{Addr: cfg.Address, Handler: httpapi.New(repo, files, cfg, logger, pool.Ping), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}

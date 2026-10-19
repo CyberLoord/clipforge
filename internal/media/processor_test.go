@@ -209,4 +209,52 @@ func TestMediaSmoke(t *testing.T) {
 	if len(files) != 3 {
 		t.Fatalf("cancelled output leaked: %v", files)
 	}
+	t.Run("without audio or transcript", func(t *testing.T) {
+		dir := t.TempDir()
+		silent := filepath.Join(dir, "silent.mp4")
+		if err := run(ctx, ffmpeg, "", io.Discard, "-nostdin", "-v", "error", "-i", source, "-t", "15", "-c:v", "copy", "-an", silent); err != nil {
+			t.Fatal(err)
+		}
+		if info, err := processor.Probe(ctx, silent); err != nil || math.Abs(info.Duration-15) > 0.15 {
+			t.Fatalf("silent source=%+v error=%v", info, err)
+		}
+		if err := processor.Extract(ctx, silent, filepath.Join(dir, "audio.mp3")); err == nil {
+			t.Fatal("extracted nonexistent audio")
+		}
+		output := filepath.Join(dir, "clip.mp4")
+		if err := processor.Render(ctx, silent, output, nil, domain.Clip{Start: 5, End: 10}); err != nil {
+			t.Fatal(err)
+		}
+		info, err := processor.Probe(ctx, output)
+		if err != nil || info.Width != 540 || info.Height != 960 || math.Abs(info.Duration-5) > 0.15 {
+			t.Fatalf("silent clip=%+v error=%v", info, err)
+		}
+		var streamOutput limitedBuffer
+		streamOutput.limit = 64 << 10
+		if err := run(ctx, ffprobe, "", &streamOutput, "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "json", output); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(streamOutput.String(), "audio") {
+			t.Fatal("silent clip contains fabricated audio")
+		}
+		var pixels limitedBuffer
+		pixels.limit = 476 * 160
+		if err := run(ctx, ffmpeg, "", &pixels, "-nostdin", "-v", "error", "-ss", "1", "-i", output, "-frames:v", "1", "-vf", "crop=476:160:32:740,format=gray", "-f", "rawvideo", "pipe:1"); err != nil {
+			t.Fatal(err)
+		}
+		if len(pixels.Bytes()) != pixels.limit || pixels.truncated {
+			t.Fatal("could not inspect caption area")
+		}
+		low, high := byte(255), byte(0)
+		for _, pixel := range pixels.Bytes() {
+			low, high = min(low, pixel), max(high, pixel)
+		}
+		if high-low > 3 {
+			t.Fatalf("empty caption area is not uniform: %d..%d", low, high)
+		}
+		files, _ := os.ReadDir(dir)
+		if len(files) != 2 {
+			t.Fatalf("unexpected temporary files: %v", files)
+		}
+	})
 }

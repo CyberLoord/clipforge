@@ -63,21 +63,16 @@ func (p *Processor) Probe(ctx context.Context, path string) (domain.Info, error)
 		return domain.Info{}, errors.New("video has no valid duration")
 	}
 	info := domain.Info{Duration: duration}
-	var hasAudio bool
 	for _, stream := range result.Streams {
 		if stream.Type == "video" && info.Width == 0 {
 			info.Width, info.Height = stream.Width, stream.Height
 		}
-		hasAudio = hasAudio || stream.Type == "audio"
 	}
 	if info.Width <= 0 || info.Height <= 0 {
 		return domain.Info{}, errors.New("file contains no video stream")
 	}
 	if info.Width > 8192 || info.Height > 8192 || int64(info.Width)*int64(info.Height) > 33554432 {
 		return domain.Info{}, errors.New("video resolution exceeds 8K")
-	}
-	if !hasAudio {
-		return domain.Info{}, errors.New("file contains no audio stream")
 	}
 	return info, nil
 }
@@ -121,22 +116,26 @@ func (p *Processor) Render(ctx context.Context, input, output string, segments [
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp(filepath.Dir(output), ".subtitles-"+filepath.Base(output)+"-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	if err := os.WriteFile(filepath.Join(dir, "subtitles.ass"), []byte(subtitles(segments, clip)), 0600); err != nil {
-		return fmt.Errorf("write subtitles: %w", err)
+	dir := ""
+	filter := "scale=w='max(2,trunc(min(540,960*dar)/2)*2)':h='max(2,trunc(min(960,540/dar)/2)*2)',setsar=1,pad=540:960:(ow-iw)/2:(oh-ih)/2:color=0x16171b"
+	if len(segments) > 0 {
+		dir, err = os.MkdirTemp(filepath.Dir(output), ".subtitles-"+filepath.Base(output)+"-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		if err := os.WriteFile(filepath.Join(dir, "subtitles.ass"), []byte(subtitles(segments, clip)), 0600); err != nil {
+			return fmt.Errorf("write subtitles: %w", err)
+		}
+		filter += ",ass=subtitles.ass"
 	}
 	return atomicOutput(output, ".mp4", func(temp string) error {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		filter := "scale=w='max(2,trunc(min(540,960*dar)/2)*2)':h='max(2,trunc(min(960,540/dar)/2)*2)',setsar=1,pad=540:960:(ow-iw)/2:(oh-ih)/2:color=0x16171b,ass=subtitles.ass"
 		return run(ctx, p.ffmpeg, dir, io.Discard,
 			"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-threads", "2",
 			"-ss", seconds(clip.Start), "-protocol_whitelist", "file", "-f", "mov", "-i", input,
-			"-t", seconds(clip.End-clip.Start), "-map", "0:v:0", "-map", "0:a:0", "-sn", "-dn", "-map_metadata", "-1",
+			"-t", seconds(clip.End-clip.Start), "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-map_metadata", "-1",
 			"-vf", filter, "-filter_threads", "1", "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", "23",
 			"-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "96k", "-ac", "2",
 			"-movflags", "+faststart", "-f", "mp4", temp)
