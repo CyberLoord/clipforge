@@ -140,8 +140,8 @@ func (w *Worker) process(parent context.Context, lease store.Lease) {
 		<-done
 	}()
 	job := lease.Job
-	w.cleanupAbandoned(job, lease.Token)
-	w.cleanupTemp(job.ID, lease.Token)
+	w.cleanupAbandoned(job, lease.PreviousToken)
+	w.cleanupTemp(job.ID, lease.PreviousToken)
 	outputs := []string{}
 	committed := false
 	defer func() {
@@ -191,7 +191,10 @@ func (w *Worker) process(parent context.Context, lease store.Lease) {
 	}
 }
 
-func (w *Worker) cleanupAbandoned(job domain.Job, token string) {
+func (w *Worker) cleanupAbandoned(job domain.Job, previousToken string) {
+	if previousToken == "" {
+		return
+	}
 	dir := filepath.Join(w.cfg.DataDir, "jobs", job.ID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -208,7 +211,7 @@ func (w *Worker) cleanupAbandoned(job domain.Job, token string) {
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
-		if strings.Contains(entry.Name(), "-"+token) {
+		if !strings.Contains(entry.Name(), "-"+previousToken) {
 			continue
 		}
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".subtitles-") {
@@ -226,14 +229,17 @@ func (w *Worker) cleanupAbandoned(job domain.Job, token string) {
 	}
 }
 
-func (w *Worker) cleanupTemp(id, token string) {
+func (w *Worker) cleanupTemp(id, previousToken string) {
+	if previousToken == "" {
+		return
+	}
 	dir := filepath.Join(w.cfg.DataDir, "tmp")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), id+"-") && !strings.HasPrefix(entry.Name(), id+"-"+token+"-") {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), id+"-"+previousToken+"-") {
 			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
 				w.log.Warn("temporary audio cleanup failed", "job_id", id, "error", err)
 			}

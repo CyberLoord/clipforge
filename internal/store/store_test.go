@@ -127,7 +127,7 @@ func TestExpiredLeaseIsFenced(t *testing.T) {
 	old := claim(t, s, 3)
 	expire(t, s, job.ID)
 	current := claim(t, s, 3)
-	if current.Token == old.Token || current.Job.Attempts != 2 {
+	if current.Token == old.Token || current.PreviousToken != old.Token || current.Job.Attempts != 2 {
 		t.Fatalf("invalid recovered lease: %+v", current)
 	}
 	ctx := context.Background()
@@ -153,7 +153,7 @@ func TestExpiredLeaseIsFenced(t *testing.T) {
 	if err := s.Retry(ctx, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := claim(t, s, 3); got.Job.Attempts != 1 || got.Job.Stage != "probe" {
+	if got := claim(t, s, 3); got.Job.Attempts != 1 || got.Job.Stage != "probe" || got.PreviousToken != current.Token {
 		t.Fatalf("retry did not reset attempts: %+v", got.Job)
 	}
 }
@@ -174,6 +174,12 @@ func TestRecoveryHasBoundedAttempts(t *testing.T) {
 	got, err := s.Get(context.Background(), job.ID)
 	if err != nil || got.Status != "failed" || got.Error == "" {
 		t.Fatalf("job = %+v, error = %v", got, err)
+	}
+	if err := s.Retry(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if recovered := claim(t, s, 3); recovered.PreviousToken == "" {
+		t.Fatal("crash recovery discarded previous lease token")
 	}
 }
 
@@ -196,7 +202,11 @@ func TestCheckpointAndDelayedRetry(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `UPDATE jobs SET available_at = now() WHERE id = $1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
+	previousToken := lease.Token
 	lease = claim(t, s, 2)
+	if lease.PreviousToken != previousToken {
+		t.Fatal("retry discarded previous lease token")
+	}
 	if lease.Job.Stage != "transcribe" || lease.Job.Duration != 90 || lease.Job.Attempts != 2 {
 		t.Fatalf("lost checkpoint: %+v", lease.Job)
 	}

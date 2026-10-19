@@ -248,8 +248,8 @@ func TestReexportPreservesPublishedFiles(t *testing.T) {
 	if _, err := os.Stat(oldPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("abandoned file was not removed: %v", err)
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("cleanup removed a file without a previous lease token: %v", err)
 	}
 }
 
@@ -267,21 +267,23 @@ func TestModeCannotChangeBetweenStages(t *testing.T) {
 func TestCleanupKeepsCurrentLeaseAndPublishedOutput(t *testing.T) {
 	w := testWorker(t, &fakeQueue{}, &fakeMedia{}, &fakeAI{})
 	lease := testLease("render")
+	lease.PreviousToken = domain.NewID()
 	dir := filepath.Join(w.cfg.DataDir, "jobs", lease.Job.ID)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	published := filepath.Join("jobs", lease.Job.ID, "published-1-old.mp4")
+	publishedName := "published-1-" + lease.PreviousToken + ".mp4"
+	published := filepath.Join("jobs", lease.Job.ID, publishedName)
 	lease.Job.Clips[0].Path = published
 	for _, test := range []struct {
 		name      string
 		directory bool
 		keep      bool
 	}{
-		{name: "published-1-old.mp4", keep: true},
-		{name: ".render-clip-1-old.mp4-123.mp4"},
+		{name: publishedName, keep: true},
+		{name: ".render-clip-1-" + lease.PreviousToken + ".mp4-123.mp4"},
 		{name: ".render-clip-1-" + lease.Token + ".mp4-123.mp4", keep: true},
-		{name: ".subtitles-clip-1-old.mp4-123", directory: true},
+		{name: ".subtitles-clip-1-" + lease.PreviousToken + ".mp4-123", directory: true},
 		{name: ".subtitles-clip-1-" + lease.Token + ".mp4-123", directory: true, keep: true},
 		{name: "unrelated", directory: true, keep: true},
 	} {
@@ -296,12 +298,43 @@ func TestCleanupKeepsCurrentLeaseAndPublishedOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			w.cleanupAbandoned(lease.Job, lease.Token)
+			w.cleanupAbandoned(lease.Job, lease.PreviousToken)
 			_, err = os.Stat(path)
 			if (err == nil) != test.keep {
 				t.Fatalf("cleanup keep = %v, want %v, error %v", err == nil, test.keep, err)
 			}
 		})
+	}
+}
+
+func TestStaleCleanupCannotRemoveNewerLeaseFiles(t *testing.T) {
+	w := testWorker(t, &fakeQueue{}, &fakeMedia{}, &fakeAI{})
+	stale := testLease("render")
+	stale.PreviousToken = domain.NewID()
+	newToken := domain.NewID()
+	jobDir := filepath.Join(w.cfg.DataDir, "jobs", stale.Job.ID)
+	audioDir := filepath.Join(w.cfg.DataDir, "tmp")
+	newOutput := filepath.Join(jobDir, "clip-1-"+newToken+".mp4")
+	newSubtitles := filepath.Join(jobDir, ".subtitles-clip-1-"+newToken+".mp4-random")
+	newAudio := filepath.Join(audioDir, stale.Job.ID+"-"+newToken+"-random")
+	oldAudio := filepath.Join(audioDir, stale.Job.ID+"-"+stale.PreviousToken+"-random")
+	for _, dir := range []string{jobDir, newSubtitles, newAudio, oldAudio} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(newOutput, []byte("published after the stale claim"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w.cleanupAbandoned(stale.Job, stale.PreviousToken)
+	w.cleanupTemp(stale.Job.ID, stale.PreviousToken)
+	for _, path := range []string{newOutput, newSubtitles, newAudio} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("stale cleanup removed newer lease artifact: %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(oldAudio); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("previous lease audio not cleaned: %v", err)
 	}
 }
 

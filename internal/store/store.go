@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/CyberLoord/clipforge/internal/domain"
@@ -24,8 +25,9 @@ type Store struct {
 }
 
 type Lease struct {
-	Job   domain.Job
-	Token string
+	Job           domain.Job
+	Token         string
+	PreviousToken string
 }
 
 const columns = `id, filename, status, stage, mode, error, source_path, duration, transcript, clips, attempts, created_at, updated_at`
@@ -57,10 +59,11 @@ type scanner interface {
 	Scan(...any) error
 }
 
-func scanJob(row scanner) (domain.Job, error) {
+func scanJob(row scanner, extra ...any) (domain.Job, error) {
 	var job domain.Job
 	var transcript, clips []byte
-	err := row.Scan(&job.ID, &job.Filename, &job.Status, &job.Stage, &job.Mode, &job.Error, &job.SourcePath, &job.Duration, &transcript, &clips, &job.Attempts, &job.CreatedAt, &job.UpdatedAt)
+	fields := []any{&job.ID, &job.Filename, &job.Status, &job.Stage, &job.Mode, &job.Error, &job.SourcePath, &job.Duration, &transcript, &clips, &job.Attempts, &job.CreatedAt, &job.UpdatedAt}
+	err := row.Scan(append(fields, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return job, ErrNotFound
 	}
@@ -131,7 +134,7 @@ func (s *Store) mutationError(ctx context.Context, id string) error {
 }
 
 func (s *Store) Cancel(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'cancelled', error = '', lease_token = '', lease_until = NULL, updated_at = now() WHERE id = $1 AND status IN ('queued', 'running')`, id)
+	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'cancelled', error = '', lease_until = NULL, updated_at = now() WHERE id = $1 AND status IN ('queued', 'running')`, id)
 	if err != nil {
 		return err
 	}
@@ -142,7 +145,7 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 }
 
 func (s *Store) Retry(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'queued', error = '', attempts = 0, lease_token = '', lease_until = NULL, available_at = now(), updated_at = now() WHERE id = $1 AND status IN ('failed', 'cancelled')`, id)
+	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'queued', error = '', attempts = 0, lease_until = NULL, available_at = now(), updated_at = now() WHERE id = $1 AND status IN ('failed', 'cancelled')`, id)
 	if err != nil {
 		return err
 	}
@@ -193,19 +196,21 @@ func (s *Store) Reexport(ctx context.Context, id, clipID string, start, end floa
 }
 
 func (s *Store) Claim(ctx context.Context, duration time.Duration, maxAttempts int) (Lease, error) {
-	if _, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'failed', error = 'Worker stopped before the stage completed; retry limit reached.', lease_token = '', lease_until = NULL, updated_at = now() WHERE status = 'running' AND lease_until <= now() AND attempts >= $1`, maxAttempts); err != nil {
+	if _, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'failed', error = 'Worker stopped before the stage completed; retry limit reached.', lease_until = NULL, updated_at = now() WHERE status = 'running' AND lease_until <= now() AND attempts >= $1`, maxAttempts); err != nil {
 		return Lease{}, err
 	}
 	token := domain.NewID()
+	var previousToken string
+	returning := "jobs." + strings.ReplaceAll(columns, ", ", ", jobs.")
 	job, err := scanJob(s.pool.QueryRow(ctx, `WITH candidate AS (
-		SELECT id FROM jobs
+		SELECT id, lease_token AS previous_token FROM jobs
 		WHERE (status = 'queued' AND available_at <= now()) OR (status = 'running' AND lease_until <= now() AND attempts < $3)
 		ORDER BY available_at, created_at
 		FOR UPDATE SKIP LOCKED LIMIT 1
-	) UPDATE jobs SET status = 'running', attempts = attempts + 1, lease_token = $1,
+	) UPDATE jobs SET status = 'running', attempts = jobs.attempts + 1, lease_token = $1,
 		lease_until = now() + $2 * interval '1 second', updated_at = now()
-		WHERE id = (SELECT id FROM candidate) RETURNING `+columns, token, duration.Seconds(), maxAttempts))
-	return Lease{Job: job, Token: token}, err
+		FROM candidate WHERE jobs.id = candidate.id RETURNING `+returning+`, candidate.previous_token`, token, duration.Seconds(), maxAttempts), &previousToken)
+	return Lease{Job: job, Token: token, PreviousToken: previousToken}, err
 }
 
 func (s *Store) Renew(ctx context.Context, lease Lease, duration time.Duration) error {
@@ -254,7 +259,7 @@ func (s *Store) Complete(ctx context.Context, lease Lease, clips []domain.Clip) 
 }
 
 func (s *Store) Fail(ctx context.Context, lease Lease, message string, retry bool, delay time.Duration, maxAttempts int) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = CASE WHEN $4 AND attempts < $6 THEN 'queued' ELSE 'failed' END, error = $3, available_at = now() + $5 * interval '1 second', lease_token = '', lease_until = NULL, updated_at = now() WHERE id = $1 AND status = 'running' AND lease_token = $2 AND lease_until > now()`, lease.Job.ID, lease.Token, message, retry, delay.Seconds(), maxAttempts)
+	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = CASE WHEN $4 AND attempts < $6 THEN 'queued' ELSE 'failed' END, error = $3, available_at = now() + $5 * interval '1 second', lease_until = NULL, updated_at = now() WHERE id = $1 AND status = 'running' AND lease_token = $2 AND lease_until > now()`, lease.Job.ID, lease.Token, message, retry, delay.Seconds(), maxAttempts)
 	if err != nil {
 		return err
 	}
