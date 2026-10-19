@@ -96,7 +96,7 @@ func TestSelectionRejectsMalformedData(t *testing.T) {
 	for _, response := range []string{
 		`{}`, `{"choices":[]}`, `{"choices":[{"finish_reason":"length","message":{"content":"{}"}}]}`,
 		`{"choices":[{"finish_reason":"stop","message":{"refusal":"declined","content":"{}"}}]}`,
-		selectionResponse(`{"clips":[{"start":0,"end":19,"title":"t","reason":"r"}]}`),
+		selectionResponse(`{"clips":[{"start":0,"end":14.999,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"start":0,"end":61,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"end":25,"title":"t","reason":"r"}]}`),
 		selectionResponse(`{"clips":[{"start":0,"end":25,"title":"t","reason":"r","extra":true}]}`),
@@ -151,7 +151,7 @@ func TestRequestCancellationAndTimeout(t *testing.T) {
 }
 
 func TestDemoDurationBoundaries(t *testing.T) {
-	for _, duration := range []float64{20, 20.1, 39.9, 40, 59.9, 60, 1800} {
+	for _, duration := range []float64{15, 17.642667, 20, 20.1, 29.9, 30, 39.9, 40, 44.9, 45, 59.9, 60, 1800} {
 		demo := NewDemo()
 		segments, err := demo.Transcribe(context.Background(), "", duration)
 		if err != nil {
@@ -164,6 +164,20 @@ func TestDemoDurationBoundaries(t *testing.T) {
 		if len(clips) == 0 || !strings.Contains(segments[0].Text, "Демо") {
 			t.Fatalf("invalid demo: %v", clips)
 		}
+		if duration < 30 && (len(clips) != 1 || clips[0].Start != 0 || clips[0].End != duration) {
+			t.Fatalf("short demo should use the whole video: duration=%g clips=%v", duration, clips)
+		}
+	}
+}
+
+func TestDemoRejectsVideoBelowMinimum(t *testing.T) {
+	demo := NewDemo()
+	if _, err := demo.Transcribe(context.Background(), "", 14.999); err == nil {
+		t.Fatal("accepted video shorter than 15 seconds")
+	}
+	segments := []domain.Segment{{Start: 0, End: 14.999, Text: "Демо"}}
+	if _, err := demo.Select(context.Background(), segments, 14.999); err == nil {
+		t.Fatal("selected a clip shorter than 15 seconds")
 	}
 }
 

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -147,5 +148,22 @@ func TestUploadWithLostInsertResponse(t *testing.T) {
 	}
 	if _, err := os.Stat(repo.jobs[0].SourcePath); err != nil {
 		t.Fatalf("committed job lost its source: %v", err)
+	}
+}
+
+func TestConfigExposesClipLimits(t *testing.T) {
+	files, _ := storage.New(t.TempDir())
+	handler := New(&fakeRepo{}, files, config.Config{}, slog.Default(), func(context.Context) error { return nil })
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
+	var limits struct {
+		Min float64 `json:"min_clip_seconds"`
+		Max float64 `json:"max_clip_seconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.Min != 15 || limits.Max != 60 {
+		t.Fatalf("unexpected limits: %+v", limits)
 	}
 }

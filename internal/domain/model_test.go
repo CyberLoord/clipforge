@@ -13,10 +13,12 @@ func TestValidateClips(t *testing.T) {
 		wantError bool
 	}{
 		{"valid", []Clip{valid}, false},
+		{"minimum", []Clip{{Start: 0, End: 15, Title: "a", Reason: "b"}}, false},
+		{"short video", []Clip{{Start: 0, End: 17.642667, Title: "a", Reason: "b"}}, false},
 		{"empty", nil, true},
 		{"out of bounds", []Clip{{Start: 90, End: 120, Title: "a", Reason: "b"}}, true},
 		{"reversed", []Clip{{Start: 30, End: 10, Title: "a", Reason: "b"}}, true},
-		{"too short", []Clip{{Start: 0, End: 19, Title: "a", Reason: "b"}}, true},
+		{"too short", []Clip{{Start: 0, End: 14.999, Title: "a", Reason: "b"}}, true},
 		{"too long", []Clip{{Start: 0, End: 61, Title: "a", Reason: "b"}}, true},
 		{"duplicate", []Clip{valid, valid}, true},
 		{"nan", []Clip{{Start: math.NaN(), End: 30, Title: "a", Reason: "b"}}, true},
@@ -28,6 +30,22 @@ func TestValidateClips(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateClipDurationBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		duration  float64
+		wantError bool
+	}{
+		{15, false},
+		{17.642667, false},
+		{14.999, true},
+	} {
+		err := ValidateClip(Clip{Start: 0, End: tt.duration}, tt.duration)
+		if (err != nil) != tt.wantError {
+			t.Fatalf("duration=%g error=%v", tt.duration, err)
+		}
 	}
 }
 

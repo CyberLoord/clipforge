@@ -26,16 +26,17 @@ test("timestamp input accepts decimal seconds and rejects malformed minutes", ()
 });
 
 test("bounds reject missing, reversed, short, long and out-of-video ranges", () => {
-  assert.equal(validateBounds(0, 20, 100, 20, 60), "");
-  assert.equal(validateBounds(40, 100, 100, 20, 60), "");
+  assert.equal(validateBounds(0, 15, 100, 15, 60), "");
+  assert.equal(validateBounds(0, 17.642667, 17.642667, 15, 60), "");
+  assert.equal(validateBounds(40, 100, 100, 15, 60), "");
   for (const [start, end] of [
     [null, 20],
     [5, 2],
     [-1, 30],
-    [0, 19.99],
+    [0, 14.99],
     [0, 60.01],
     [90, 120],
   ]) {
-    assert.notEqual(validateBounds(start, end, 100, 20, 60), "");
+    assert.notEqual(validateBounds(start, end, 100, 15, 60), "");
   }
 });

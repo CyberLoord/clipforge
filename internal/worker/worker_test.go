@@ -346,3 +346,23 @@ func TestInvalidDurationIsPermanent(t *testing.T) {
 		t.Fatalf("invalid input accepted: %+v", queue)
 	}
 }
+
+func TestProbeDurationBounds(t *testing.T) {
+	for _, tt := range []struct {
+		duration float64
+		valid    bool
+	}{
+		{14.999, false}, {15, true}, {17.642667, true}, {1800, true}, {1800.001, false},
+	} {
+		w := testWorker(t, &fakeQueue{}, &fakeMedia{probeDuration: tt.duration}, &fakeAI{})
+		job := testLease("probe").Job
+		var outputs []string
+		err := w.runStage(context.Background(), &job, domain.NewID(), &outputs)
+		if (err == nil) != tt.valid {
+			t.Fatalf("duration %g: %v", tt.duration, err)
+		}
+		if tt.valid && (job.Duration != tt.duration || job.Stage != "transcribe") {
+			t.Fatalf("probe did not advance: %+v", job)
+		}
+	}
+}

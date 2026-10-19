@@ -53,7 +53,7 @@ func New(repo Repository, files storage.Storage, cfg config.Config, logger *slog
 		s.json(w, 200, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
-		s.json(w, 200, map[string]any{"mode": cfg.Mode, "max_upload_bytes": cfg.MaxUploadBytes, "max_duration_seconds": cfg.MaxDuration, "min_clip_seconds": 20, "max_clip_seconds": 60})
+		s.json(w, 200, map[string]any{"mode": cfg.Mode, "max_upload_bytes": cfg.MaxUploadBytes, "max_duration_seconds": cfg.MaxDuration, "min_clip_seconds": domain.MinClipSeconds, "max_clip_seconds": domain.MaxClipSeconds})
 	})
 	mux.HandleFunc("GET /api/jobs", s.list)
 	mux.HandleFunc("POST /api/jobs", s.upload)

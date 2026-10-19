@@ -257,8 +257,8 @@ func (w *Worker) runStage(ctx context.Context, job *domain.Job, token string, ou
 		if err != nil {
 			return err
 		}
-		if math.IsNaN(info.Duration) || math.IsInf(info.Duration, 0) || info.Duration < 20 || info.Duration > w.cfg.MaxDuration {
-			return fmt.Errorf("video duration must be between 20 and %.0f seconds", w.cfg.MaxDuration)
+		if math.IsNaN(info.Duration) || math.IsInf(info.Duration, 0) || info.Duration < domain.MinClipSeconds || info.Duration > w.cfg.MaxDuration {
+			return fmt.Errorf("длительность видео — %.2f с; допустимо от %d до %.0f с", info.Duration, domain.MinClipSeconds, w.cfg.MaxDuration)
 		}
 		job.Duration = info.Duration
 		job.Stage = "transcribe"

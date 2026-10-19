@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+const MinClipSeconds = 15
+const MaxClipSeconds = 60
+
 type Segment struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
@@ -83,8 +86,8 @@ func ValidateClip(clip Clip, duration float64) error {
 		return errors.New("clip boundaries are outside the video")
 	}
 	length := clip.End - clip.Start
-	if length < 20 || length > 60 {
-		return errors.New("clip duration must be between 20 and 60 seconds")
+	if length < MinClipSeconds || length > MaxClipSeconds {
+		return fmt.Errorf("clip duration must be between %d and %d seconds", MinClipSeconds, MaxClipSeconds)
 	}
 	return nil
 }

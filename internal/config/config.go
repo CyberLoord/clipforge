@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/CyberLoord/clipforge/internal/domain"
 )
 
 type Config struct {
@@ -55,7 +57,7 @@ func Load() (Config, error) {
 		return c, err
 	}
 	c.MaxUploadBytes = int64(mb) * 1024 * 1024
-	seconds, err := integer("MAX_DURATION_SECONDS", 1800, 20, 86400)
+	seconds, err := integer("MAX_DURATION_SECONDS", 1800, domain.MinClipSeconds, 86400)
 	if err != nil {
 		return c, err
 	}
