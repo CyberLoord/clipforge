@@ -1,0 +1,31 @@
+# Environment files and local overrides
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Go build and test artifacts
+/bin/
+/build/
+*.test
+coverage.out
+coverage.html
+
+# Frontend dependencies and generated output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime data and media (small test fixtures can live in testdata/)
+/data/
+/uploads/
+/storage/
+/tmp/
+/work/
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
