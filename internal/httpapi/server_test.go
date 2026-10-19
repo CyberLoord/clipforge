@@ -25,6 +25,7 @@ type fakeRepo struct {
 	jobs               []domain.Job
 	createError        error
 	persistBeforeError bool
+	reprocessError     error
 }
 
 func (f *fakeRepo) Create(_ context.Context, j *domain.Job) error {
@@ -44,7 +45,124 @@ func (f *fakeRepo) Get(context.Context, string) (domain.Job, error) {
 	}
 	return f.jobs[0], nil
 }
-func (f *fakeRepo) Cancel(context.Context, string) error                             { return nil }
+func (f *fakeRepo) Cancel(context.Context, string) error { return nil }
+func (f *fakeRepo) Reprocess(_ context.Context, id, mode string) error {
+	if f.reprocessError != nil {
+		return f.reprocessError
+	}
+	f.jobs[0].Mode = mode
+	f.jobs[0].Status = "queued"
+	return nil
+}
+
+func TestUploadModes(t *testing.T) {
+	for _, tt := range []struct {
+		name, mode, key string
+		late            bool
+		status          int
+	}{
+		{"split", "split", "", false, 202},
+		{"demo", "demo", "", false, 202},
+		{"openai", "openai", "test-key", false, 202},
+		{"missing key", "openai", "", false, 503},
+		{"unknown mode", "unknown", "", false, 400},
+		{"mode after file", "split", "", true, 400},
+		{"oversized mode", strings.Repeat("x", 33), "", false, 400},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			files, _ := storage.New(root)
+			repo := &fakeRepo{}
+			handler := New(repo, files, config.Config{Mode: "split", APIKey: tt.key, MaxUploadBytes: 100}, slog.New(slog.NewTextHandler(io.Discard, nil)), func(context.Context) error { return nil })
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			if !tt.late {
+				writer.WriteField("mode", tt.mode)
+			}
+			part, _ := writer.CreateFormFile("file", "video.mp4")
+			part.Write([]byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'})
+			if tt.late {
+				writer.WriteField("mode", tt.mode)
+			}
+			writer.Close()
+			req := httptest.NewRequest("POST", "/api/jobs", &body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.status {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if tt.status == 202 {
+				if len(repo.jobs) != 1 || repo.jobs[0].Mode != tt.mode {
+					t.Fatal("selected mode was not persisted")
+				}
+			} else {
+				if len(repo.jobs) != 0 {
+					t.Fatal("invalid request created a job")
+				}
+				filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !d.IsDir() {
+						t.Errorf("rejected upload left a file: %s", path)
+					}
+					return nil
+				})
+			}
+		})
+	}
+}
+
+func TestReprocess(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, key, contentType string
+		repoError                    error
+		status                       int
+	}{
+		{"split", `{"mode":"split"}`, "", "application/json", nil, 202},
+		{"openai", `{"mode":"openai"}`, "test-key", "application/json", nil, 202},
+		{"missing key", `{"mode":"openai"}`, "", "application/json", nil, 503},
+		{"invalid mode", `{"mode":"invalid"}`, "", "application/json", nil, 400},
+		{"unknown field", `{"mode":"split","extra":true}`, "", "application/json", nil, 400},
+		{"trailing json", `{"mode":"split"}{}`, "", "application/json", nil, 400},
+		{"wrong content type", `{"mode":"split"}`, "", "text/plain", nil, 415},
+		{"running job", `{"mode":"split"}`, "", "application/json", store.ErrConflict, 409},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			id := domain.NewID()
+			repo := &fakeRepo{jobs: []domain.Job{{ID: id, Mode: "demo", Status: "completed"}}, reprocessError: tt.repoError}
+			files, _ := storage.New(t.TempDir())
+			handler := New(repo, files, config.Config{APIKey: tt.key}, slog.Default(), func(context.Context) error { return nil })
+			req := httptest.NewRequest("POST", "/api/jobs/"+id+"/reprocess", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", tt.contentType)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.status {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if tt.status != 202 && repo.jobs[0].Status != "completed" {
+				t.Fatal("rejected request changed the job")
+			}
+			if tt.status == 202 {
+				var job domain.Job
+				if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil || job.Status != "queued" || job.Mode == "demo" {
+					t.Fatal("response does not contain the queued job")
+				}
+			}
+		})
+	}
+}
+
+func TestConfigDoesNotExposeAPIKey(t *testing.T) {
+	files, _ := storage.New(t.TempDir())
+	handler := New(&fakeRepo{}, files, config.Config{Mode: "split", APIKey: "private-value"}, slog.Default(), func(context.Context) error { return nil })
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
+	if strings.Contains(rec.Body.String(), "private-value") || !strings.Contains(rec.Body.String(), `"openai"`) {
+		t.Fatal("provider availability must not expose its key")
+	}
+}
 func (f *fakeRepo) Retry(context.Context, string) error                              { return nil }
 func (f *fakeRepo) Reexport(context.Context, string, string, float64, float64) error { return nil }
 
@@ -157,13 +275,14 @@ func TestConfigExposesClipLimits(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
 	var limits struct {
-		Min float64 `json:"min_clip_seconds"`
-		Max float64 `json:"max_clip_seconds"`
+		Min      float64 `json:"min_clip_seconds"`
+		VideoMin float64 `json:"min_video_seconds"`
+		Max      float64 `json:"max_clip_seconds"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &limits); err != nil {
 		t.Fatal(err)
 	}
-	if limits.Min != 15 || limits.Max != 60 {
+	if limits.Min != 5 || limits.Max != 60 || limits.VideoMin != 15 {
 		t.Fatalf("unexpected limits: %+v", limits)
 	}
 }

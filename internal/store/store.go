@@ -155,6 +155,22 @@ func (s *Store) Retry(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) Reprocess(ctx context.Context, id, mode string) error {
+	switch mode {
+	case "split", "demo", "openai":
+	default:
+		return fmt.Errorf("%w: unsupported processing mode", ErrConflict)
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'queued', stage = 'probe', mode = $2, duration = 0, transcript = '[]', clips = '[]', attempts = 0, error = '', lease_until = NULL, available_at = now(), updated_at = now() WHERE id = $1 AND status IN ('completed', 'failed', 'cancelled')`, id, mode)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return s.mutationError(ctx, id)
+	}
+	return nil
+}
+
 func (s *Store) Reexport(ctx context.Context, id, clipID string, start, end float64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

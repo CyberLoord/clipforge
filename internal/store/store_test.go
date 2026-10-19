@@ -260,3 +260,111 @@ func TestReexportPreservesOtherClips(t *testing.T) {
 		t.Fatalf("concurrent edit error = %v", err)
 	}
 }
+
+func TestReprocessResetsCompletedAndStoppedJobs(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			job := createJob(t, s)
+			lease := claim(t, s, 3)
+			lease.Job.Duration = 90
+			lease.Job.Stage = "render"
+			lease.Job.Transcript = []domain.Segment{{Start: 0, End: 30, Text: "saved transcript"}}
+			lease.Job.Clips = []domain.Clip{{ID: "old", Start: 0, End: 30, Title: "Old clip", Reason: "Old reason", Path: "old.mp4", Revision: 2}}
+			if err := s.Checkpoint(ctx, lease, lease.Job); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch status {
+			case "completed":
+				err = s.Complete(ctx, lease, lease.Job.Clips)
+			case "failed":
+				err = s.Fail(ctx, lease, "failed", false, 0, 3)
+			case "cancelled":
+				err = s.Cancel(ctx, job.ID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Reprocess(ctx, job.ID, "split"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.Get(ctx, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "queued" || got.Stage != "probe" || got.Mode != "split" || got.Duration != 0 || got.Attempts != 0 || got.Error != "" || len(got.Transcript) != 0 || len(got.Clips) != 0 {
+				t.Fatalf("reprocess did not reset processing state: %+v", got)
+			}
+			if got.SourcePath != job.SourcePath || got.Filename != job.Filename || !got.CreatedAt.Equal(job.CreatedAt) {
+				t.Fatalf("reprocess changed source metadata: %+v", got)
+			}
+			if err := s.Complete(ctx, lease, lease.Job.Clips); !errors.Is(err, ErrLeaseLost) {
+				t.Fatalf("old lease can overwrite reprocessed job: %v", err)
+			}
+			fresh := claim(t, s, 3)
+			if fresh.Job.Attempts != 1 || fresh.Job.Stage != "probe" || fresh.Token == lease.Token {
+				t.Fatalf("invalid fresh lease: %+v", fresh)
+			}
+		})
+	}
+}
+
+func TestReprocessRejectsActiveJobsAndInvalidModes(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	job := createJob(t, s)
+	if err := s.Reprocess(ctx, job.ID, "split"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("queued job accepted reprocess: %v", err)
+	}
+	lease := claim(t, s, 3)
+	if err := s.Reprocess(ctx, job.ID, "openai"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("running job accepted reprocess: %v", err)
+	}
+	if err := s.Cancel(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reprocess(ctx, job.ID, "unknown"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("invalid mode accepted: %v", err)
+	}
+	got, err := s.Get(ctx, job.ID)
+	if err != nil || got.Mode != "demo" || got.Status != "cancelled" {
+		t.Fatalf("invalid reprocess changed job: %+v %v", got, err)
+	}
+	if err := s.Reprocess(ctx, job.ID, "openai"); err != nil {
+		t.Fatal(err)
+	}
+	fresh := claim(t, s, 3)
+	if fresh.Job.Mode != "openai" || fresh.PreviousToken != lease.Token {
+		t.Fatalf("mode or predecessor lost: %+v", fresh)
+	}
+	if err := s.Reprocess(ctx, domain.NewID(), "demo"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing job error = %v", err)
+	}
+}
+
+func TestConcurrentReprocessHasOneWinner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	job := createJob(t, s)
+	if err := s.Cancel(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	for _, mode := range []string{"split", "demo"} {
+		go func() { results <- s.Reprocess(ctx, job.ID, mode) }()
+	}
+	winners := 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			winners++
+		} else if !errors.Is(err, ErrConflict) {
+			t.Fatal(err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("reprocess winners = %d, want 1", winners)
+	}
+}

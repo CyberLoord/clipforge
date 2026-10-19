@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/CyberLoord/clipforge/internal/domain"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -32,13 +34,16 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Config{}, errors.New("не удалось прочитать .env; проверьте формат KEY=value")
+	}
 	c := Config{
 		Address:     env("ADDR", "127.0.0.1:8080"),
 		DatabaseURL: env("DATABASE_URL", "postgres://clipforge:clipforge@localhost:5432/clipforge?sslmode=disable"),
 		DataDir:     env("DATA_DIR", "data"),
 		WebDir:      env("WEB_DIR", "web/dist"),
 		Migrations:  env("MIGRATIONS_DIR", "migrations"),
-		Mode:        env("AI_MODE", "demo"),
+		Mode:        env("AI_MODE", "split"),
 		APIKey:      os.Getenv("OPENAI_API_KEY"),
 		BaseURL:     env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		Model:       env("OPENAI_SELECTION_MODEL", "gpt-4.1-mini"),
@@ -57,7 +62,7 @@ func Load() (Config, error) {
 		return c, err
 	}
 	c.MaxUploadBytes = int64(mb) * 1024 * 1024
-	seconds, err := integer("MAX_DURATION_SECONDS", 1800, domain.MinClipSeconds, 86400)
+	seconds, err := integer("MAX_DURATION_SECONDS", 1800, domain.MinVideoSeconds, 86400)
 	if err != nil {
 		return c, err
 	}
@@ -68,8 +73,8 @@ func Load() (Config, error) {
 	if c.LeaseDuration, err = time.ParseDuration(env("LEASE_DURATION", "30s")); err != nil || c.LeaseDuration < 3*time.Second {
 		return c, fmt.Errorf("LEASE_DURATION must be at least 3s")
 	}
-	if c.Mode != "demo" && c.Mode != "openai" {
-		return c, fmt.Errorf("AI_MODE must be demo or openai")
+	if c.Mode != "split" && c.Mode != "demo" && c.Mode != "openai" {
+		return c, fmt.Errorf("AI_MODE must be split, demo or openai")
 	}
 	if c.Mode == "openai" && c.APIKey == "" {
 		return c, fmt.Errorf("OPENAI_API_KEY is required in openai mode")
@@ -93,4 +98,12 @@ func integer(key string, fallback, min, max int) (int, error) {
 		return 0, fmt.Errorf("%s must be between %d and %d", key, min, max)
 	}
 	return v, nil
+}
+
+func (c Config) AvailableModes() []string {
+	modes := []string{"split"}
+	if c.APIKey != "" {
+		modes = append(modes, "openai")
+	}
+	return append(modes, "demo")
 }

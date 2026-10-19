@@ -29,6 +29,7 @@ type Repository interface {
 	Get(context.Context, string) (domain.Job, error)
 	Cancel(context.Context, string) error
 	Retry(context.Context, string) error
+	Reprocess(context.Context, string, string) error
 	Reexport(context.Context, string, string, float64, float64) error
 }
 
@@ -53,13 +54,14 @@ func New(repo Repository, files storage.Storage, cfg config.Config, logger *slog
 		s.json(w, 200, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
-		s.json(w, 200, map[string]any{"mode": cfg.Mode, "max_upload_bytes": cfg.MaxUploadBytes, "max_duration_seconds": cfg.MaxDuration, "min_clip_seconds": domain.MinClipSeconds, "max_clip_seconds": domain.MaxClipSeconds})
+		s.json(w, 200, map[string]any{"mode": cfg.Mode, "available_modes": cfg.AvailableModes(), "min_video_seconds": domain.MinVideoSeconds, "max_upload_bytes": cfg.MaxUploadBytes, "max_duration_seconds": cfg.MaxDuration, "min_clip_seconds": domain.MinClipSeconds, "max_clip_seconds": domain.MaxClipSeconds})
 	})
 	mux.HandleFunc("GET /api/jobs", s.list)
 	mux.HandleFunc("POST /api/jobs", s.upload)
 	mux.HandleFunc("GET /api/jobs/{id}", s.get)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.cancel)
 	mux.HandleFunc("POST /api/jobs/{id}/retry", s.retry)
+	mux.HandleFunc("POST /api/jobs/{id}/reprocess", s.reprocess)
 	mux.HandleFunc("PATCH /api/jobs/{id}/clips/{clipID}", s.reexport)
 	mux.HandleFunc("GET /api/jobs/{id}/clips/{clipID}/video", s.video)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { s.fail(w, 404, "endpoint not found") })
@@ -131,7 +133,23 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, "expected multipart file upload")
 		return
 	}
+	mode := s.cfg.Mode
+	if mode == "" {
+		mode = "split"
+	}
 	part, err := reader.NextPart()
+	if err == nil && part.FormName() == "mode" && part.FileName() == "" {
+		value, readErr := io.ReadAll(io.LimitReader(part, 33))
+		if readErr != nil || len(value) > 32 {
+			s.fail(w, 400, "invalid mode field")
+			return
+		}
+		mode = string(value)
+		part, err = reader.NextPart()
+	}
+	if !s.modeAllowed(w, mode) {
+		return
+	}
 	if err != nil || part.FormName() != "file" {
 		s.fail(w, 400, "file field is required")
 		return
@@ -190,7 +208,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	job := domain.Job{ID: id, Filename: filename, Status: "queued", Stage: "probe", Mode: s.cfg.Mode, SourcePath: source, CreatedAt: now, UpdatedAt: now, Transcript: []domain.Segment{}, Clips: []domain.Clip{}}
+	job := domain.Job{ID: id, Filename: filename, Status: "queued", Stage: "probe", Mode: mode, SourcePath: source, CreatedAt: now, UpdatedAt: now, Transcript: []domain.Segment{}, Clips: []domain.Clip{}}
 	if err := s.repo.Create(r.Context(), &job); err != nil {
 		saved = true
 		lookup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -228,6 +246,55 @@ func (s *Server) retry(w http.ResponseWriter, r *http.Request) {
 	}
 	s.get(w, r)
 }
+func (s *Server) modeAllowed(w http.ResponseWriter, mode string) bool {
+	switch mode {
+	case "split", "demo":
+		return true
+	case "openai":
+		if s.cfg.APIKey != "" {
+			return true
+		}
+		s.fail(w, 503, "Для анализа речи добавьте OPENAI_API_KEY в .env и перезапустите приложение.")
+	default:
+		s.fail(w, 400, "unknown processing mode")
+	}
+	return false
+}
+
+func (s *Server) reprocess(w http.ResponseWriter, r *http.Request) {
+	job, ok := s.job(w, r)
+	if !ok {
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		s.fail(w, 415, "expected application/json")
+		return
+	}
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil || dec.Decode(&struct{}{}) != io.EOF {
+		s.fail(w, 400, "invalid request body")
+		return
+	}
+	if !s.modeAllowed(w, body.Mode) {
+		return
+	}
+	if err := s.repo.Reprocess(r.Context(), job.ID, body.Mode); err != nil {
+		s.repoError(w, err)
+		return
+	}
+	job, err = s.repo.Get(r.Context(), job.ID)
+	if err != nil {
+		s.repoError(w, err)
+		return
+	}
+	s.json(w, 202, job)
+}
+
 func (s *Server) reexport(w http.ResponseWriter, r *http.Request) {
 	job, ok := s.job(w, r)
 	if !ok {
