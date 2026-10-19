@@ -1,4 +1,4 @@
-import type { Job } from "./types";
+import type { Job, Mode } from "./types";
 
 export async function request<T>(
   path: string,
@@ -30,7 +30,11 @@ export function errorMessage(error: unknown): string {
     : "Не удалось выполнить запрос.";
 }
 
-export function uploadVideo(file: File, onProgress: (percent: number) => void) {
+export function uploadVideo(
+  file: File,
+  mode: Mode,
+  onProgress: (percent: number) => void,
+) {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<Job>((resolve, reject) => {
     xhr.open("POST", "/api/jobs");
@@ -54,6 +58,7 @@ export function uploadVideo(file: File, onProgress: (percent: number) => void) {
     xhr.onabort = () =>
       reject(new DOMException("Загрузка отменена.", "AbortError"));
     const form = new FormData();
+    form.append("mode", mode);
     form.append("file", file);
     xhr.send(form);
   });

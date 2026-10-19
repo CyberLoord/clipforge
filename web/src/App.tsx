@@ -4,6 +4,7 @@ import { Icon } from "./components/Icon";
 import { JobDetail, statusLabels } from "./components/JobDetail";
 import { Upload } from "./components/Upload";
 import type { Config, Job } from "./types";
+import { modeLabels } from "./modes";
 
 function selectedJobID() {
   try {
@@ -178,6 +179,9 @@ export function App() {
                   <span className={`history-status status-${item.status}`}>
                     <span className="status-dot" />
                     {statusLabels[item.status]}
+                    <span className="history-mode">
+                      · {modeLabels[item.mode]}
+                    </span>
                   </span>
                 </span>
                 {selectedID === item.id && (
@@ -217,26 +221,16 @@ export function App() {
           </div>
           <span className="mode-label">
             <span
-              className={`status-dot ${config?.mode === "openai" ? "connected" : ""}`}
+              className={`status-dot ${currentJob?.mode === "openai" ? "connected" : ""}`}
             />
-            {config
-              ? config.mode === "demo"
-                ? "Демо-режим"
-                : "Режим OpenAI"
-              : "Подключение"}
+            {currentJob
+              ? modeLabels[currentJob.mode]
+              : config
+                ? "Выбор режима"
+                : "Подключение"}
           </span>
         </header>
         <main id="main-content" tabIndex={-1}>
-          {config?.mode === "demo" && (
-            <div className="demo-banner">
-              <span className="demo-tag">ДЕМО</span>
-              <p>
-                <strong>Проверка обработки видео.</strong> Используется готовая
-                расшифровка — она не соответствует речи в вашем файле.
-                Экспортируется настоящее загруженное видео.
-              </p>
-            </div>
-          )}
           {!config ? (
             configError ? (
               <div className="connection-error" role="alert">

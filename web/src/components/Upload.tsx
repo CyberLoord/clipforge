@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Config, Job } from "../types";
 import { errorMessage, uploadVideo } from "../api";
+import { availableModes, initialMode } from "../modes";
+import { ModePicker } from "./ModePicker";
+import { DemoNotice } from "./DemoNotice";
 import { Icon } from "./Icon";
 
 export function Upload({
@@ -14,6 +17,7 @@ export function Upload({
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [mode, setMode] = useState(() => initialMode(config));
   const input = useRef<HTMLInputElement>(null);
   const operation = useRef<{ abort: () => void } | null>(null);
   const dragDepth = useRef(0);
@@ -45,10 +49,11 @@ export function Upload({
   }
 
   async function submit() {
-    if (!file || progress !== null) return;
+    if (!file || progress !== null || !availableModes(config).includes(mode))
+      return;
     setError("");
     setProgress(0);
-    const upload = uploadVideo(file, setProgress);
+    const upload = uploadVideo(file, mode, setProgress);
     operation.current = upload;
     try {
       const job = await upload.promise;
@@ -69,14 +74,24 @@ export function Upload({
     <section className="upload-page">
       <div className="eyebrow">ВИДЕОМАСТЕРСКАЯ</div>
       <h1>
-        Длинное видео.
+        Ваше видео.
         <br />
         <span>Короткие фрагменты.</span>
       </h1>
       <p className="intro">
-        Загрузите запись с речью. Clipforge выберет до трёх фрагментов и соберёт
-        вертикальные видео с субтитрами.
+        {mode === "split"
+          ? "Видео до 135 секунд делится на три равные части. Для более длинного — три фрагмента по 45 секунд. В клипах сохраняется исходный звук."
+          : mode === "openai"
+            ? "Загрузите запись с речью. Clipforge распознает текст, выберет до трёх фрагментов по смыслу и добавит субтитры."
+            : "Проверка экспорта на вашем видео с готовой тестовой расшифровкой."}
       </p>
+      <ModePicker
+        config={config}
+        value={mode}
+        onChange={setMode}
+        disabled={progress !== null}
+      />
+      {mode === "demo" && <DemoNotice />}
       <div
         className={`dropzone ${dragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`}
         onDragEnter={(event) => {
@@ -113,7 +128,8 @@ export function Upload({
           <>
             <h2>Перетащите видео сюда</h2>
             <p>
-              MP4 · до {maxMB} МБ · до {maxMinutes} минут
+              MP4 · до {maxMB} МБ · от {config.min_video_seconds ?? 15} секунд
+              до {maxMinutes} минут
             </p>
           </>
         )}
@@ -141,7 +157,7 @@ export function Upload({
             </button>
             {file && (
               <button className="button primary" onClick={submit}>
-                Создать фрагменты
+                Нарезать видео
                 <Icon name="arrow" size={18} />
               </button>
             )}
@@ -174,15 +190,29 @@ export function Upload({
       <div className="workflow">
         <div>
           <span className="step-number">01</span>
-          <h3>Речь в текст</h3>
-          <p>Расшифровка с временными метками.</p>
+          <h3>
+            {mode === "openai"
+              ? "Речь в текст"
+              : mode === "split"
+                ? "Проверка видео"
+                : "Тестовый текст"}
+          </h3>
+          <p>
+            {mode === "openai"
+              ? "Расшифровка с временными метками."
+              : mode === "split"
+                ? `Исходник от ${config.min_video_seconds ?? 15} секунд. Распознавание речи не требуется.`
+                : "Готовая расшифровка для проверки субтитров."}
+          </p>
         </div>
         <div>
           <span className="step-number">02</span>
-          <h3>Выбор момента</h3>
+          <h3>
+            {mode === "openai" ? "Выбор по смыслу" : "3 фрагмента по времени"}
+          </h3>
           <p>
-            Законченные фрагменты по {config.min_clip_seconds}–
-            {config.max_clip_seconds} секунд.
+            Длина фрагмента: {config.min_clip_seconds}–{config.max_clip_seconds}{" "}
+            секунд.
           </p>
         </div>
         <div>
@@ -192,8 +222,12 @@ export function Upload({
         </div>
       </div>
       <p className="upload-footnote">
-        <Icon name="film" size={16} /> Лучше всего подойдёт интервью, лекция или
-        разговор с одной основной речевой дорожкой.
+        <Icon name="film" size={16} />{" "}
+        {mode === "openai"
+          ? "Для анализа речи подойдёт интервью, лекция или разговор с одной основной речевой дорожкой."
+          : mode === "split"
+            ? "Нарезка по времени не анализирует содержание. После экспорта границы каждого фрагмента можно изменить."
+            : "Демо проверяет экспорт и субтитры. Для распознавания настоящей речи выберите режим «По речи · AI»."}
       </p>
     </section>
   );

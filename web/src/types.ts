@@ -1,8 +1,10 @@
-export type Mode = "demo" | "openai";
+export type Mode = "split" | "openai" | "demo";
 
 export interface Config {
   mode: Mode;
+  available_modes: Mode[];
   max_upload_bytes: number;
+  min_video_seconds: number;
   max_duration_seconds: number;
   min_clip_seconds: number;
   max_clip_seconds: number;

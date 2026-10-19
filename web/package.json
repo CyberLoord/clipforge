@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test src/timing.test.ts"
+    "test": "node --test src/*.test.ts"
   },
   "dependencies": {
     "react": "19.3.1",

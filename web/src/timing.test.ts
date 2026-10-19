@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { editableTimestamp, parseTimestamp, validateBounds } from "./timing.ts";
+import {
+  editableTimestamp,
+  parseEditedTimestamp,
+  parseTimestamp,
+  validateBounds,
+} from "./timing.ts";
 
 test("fractional timestamps survive an unchanged edit", () => {
-  for (const value of [0, 9.25, 59.99, 60, 65.4, 1799.99]) {
-    assert.equal(parseTimestamp(editableTimestamp(value)), value);
+  for (const value of [
+    0, 5.880889, 11.761778, 17.642667, 17.648667, 59.99, 60, 65.4, 1799.99,
+  ]) {
+    assert.equal(parseEditedTimestamp(editableTimestamp(value), value), value);
   }
+  assert.equal(parseEditedTimestamp("00:06", 5.880889), 6);
 });
 
 test("timestamp input accepts decimal seconds and rejects malformed minutes", () => {
@@ -26,17 +34,19 @@ test("timestamp input accepts decimal seconds and rejects malformed minutes", ()
 });
 
 test("bounds reject missing, reversed, short, long and out-of-video ranges", () => {
-  assert.equal(validateBounds(0, 15, 100, 15, 60), "");
-  assert.equal(validateBounds(0, 17.642667, 17.642667, 15, 60), "");
-  assert.equal(validateBounds(40, 100, 100, 15, 60), "");
+  assert.equal(validateBounds(0, 5, 100, 5, 60), "");
+  assert.equal(validateBounds(0, 5.88, 17.642667, 5, 60), "");
+  assert.equal(validateBounds(5.88, 11.76, 17.642667, 5, 60), "");
+  assert.equal(validateBounds(11.76, 17.642667, 17.642667, 5, 60), "");
+  assert.equal(validateBounds(40, 100, 100, 5, 60), "");
   for (const [start, end] of [
     [null, 20],
     [5, 2],
     [-1, 30],
-    [0, 14.99],
+    [0, 4.99],
     [0, 60.01],
     [90, 120],
   ]) {
-    assert.notEqual(validateBounds(start, end, 100, 15, 60), "");
+    assert.notEqual(validateBounds(start, end, 100, 5, 60), "");
   }
 });

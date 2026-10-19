@@ -22,6 +22,15 @@ export function parseTimestamp(value: string): number | null {
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
+export function parseEditedTimestamp(
+  value: string,
+  original: number,
+): number | null {
+  return value.trim() === editableTimestamp(original)
+    ? original
+    : parseTimestamp(value);
+}
+
 export function validateBounds(
   start: number | null,
   end: number | null,

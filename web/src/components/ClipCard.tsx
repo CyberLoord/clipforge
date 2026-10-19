@@ -3,7 +3,7 @@ import type { Clip, Config, Job } from "../types";
 import { errorMessage, request } from "../api";
 import {
   editableTimestamp,
-  parseTimestamp,
+  parseEditedTimestamp,
   timestamp,
   validateBounds,
 } from "../timing";
@@ -49,8 +49,8 @@ export function ClipCard({
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    const parsedStart = parseTimestamp(start);
-    const parsedEnd = parseTimestamp(end);
+    const parsedStart = parseEditedTimestamp(start, clip.start);
+    const parsedEnd = parseEditedTimestamp(end, clip.end);
     const validation = validateBounds(
       parsedStart,
       parsedEnd,
@@ -127,7 +127,7 @@ export function ClipCard({
         <button
           className="clip-timestamp"
           onClick={onSelect}
-          aria-label={`Показать текст фрагмента с ${timestamp(clip.start)} по ${timestamp(clip.end)}`}
+          aria-label={`${job.mode === "split" ? "Выбрать фрагмент" : "Показать текст фрагмента"} с ${timestamp(clip.start)} по ${timestamp(clip.end)}`}
         >
           <Icon name="clock" size={14} />
           {timestamp(clip.start)} — {timestamp(clip.end)}
@@ -183,8 +183,8 @@ export function ClipCard({
               </label>
             </div>
             <p className="field-hint">
-              мм:сс или секунды · от {config.min_clip_seconds} до {config.max_clip_seconds}{" "}
-              секунд
+              мм:сс или секунды · от {config.min_clip_seconds} до{" "}
+              {config.max_clip_seconds} секунд
             </p>
             <button
               className="button primary small"
