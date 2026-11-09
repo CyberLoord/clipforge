@@ -27,6 +27,8 @@ type Repository interface {
 	Create(context.Context, *domain.Job) error
 	List(context.Context) ([]domain.Job, error)
 	Get(context.Context, string) (domain.Job, error)
+	Events(context.Context, string) ([]domain.JobEvent, error)
+	DeadLetters(context.Context) ([]domain.DeadLetter, error)
 	Cancel(context.Context, string) error
 	Retry(context.Context, string) error
 	Reprocess(context.Context, string, string) error
@@ -48,7 +50,7 @@ func New(repo Repository, files storage.Storage, cfg config.Config, logger *slog
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := s.ready(ctx); err != nil {
-			s.fail(w, 503, "database unavailable")
+			s.fail(w, 503, "dependencies unavailable")
 			return
 		}
 		s.json(w, 200, map[string]string{"status": "ok"})
@@ -59,6 +61,8 @@ func New(repo Repository, files storage.Storage, cfg config.Config, logger *slog
 	mux.HandleFunc("GET /api/jobs", s.list)
 	mux.HandleFunc("POST /api/jobs", s.upload)
 	mux.HandleFunc("GET /api/jobs/{id}", s.get)
+	mux.HandleFunc("GET /api/jobs/{id}/events", s.events)
+	mux.HandleFunc("GET /api/dead-letters", s.deadLetters)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.cancel)
 	mux.HandleFunc("POST /api/jobs/{id}/retry", s.retry)
 	mux.HandleFunc("POST /api/jobs/{id}/reprocess", s.reprocess)

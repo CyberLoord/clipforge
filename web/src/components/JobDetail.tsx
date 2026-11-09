@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { ClipCard } from "./ClipCard";
 import { ModePicker } from "./ModePicker";
 import { DemoNotice } from "./DemoNotice";
+import { JobHistory } from "./JobHistory";
 
 export const statusLabels: Record<JobStatus, string> = {
   queued: "В очереди",
@@ -457,6 +458,7 @@ export function JobDetail({
           )}
         </section>
       )}
+      <JobHistory key={job.id} job={job} />
     </div>
   );
 }

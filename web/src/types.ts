@@ -54,3 +54,15 @@ export interface Job {
   created_at: string;
   updated_at: string;
 }
+
+export interface JobEvent {
+  id: string;
+  job_id: string;
+  sequence: number;
+  type: string;
+  status: JobStatus;
+  stage: JobStage;
+  attempt: number;
+  error?: string;
+  occurred_at: string;
+}

@@ -24,10 +24,32 @@ type fakeQueue struct {
 	retry       bool
 	renewErr    error
 	completeErr error
+	handoff     *domain.Job
+	claimLease  store.Lease
+	claimErr    error
+	failErr     error
+	handoffErr  error
 }
 
-func (q *fakeQueue) Claim(context.Context, time.Duration, int) (store.Lease, error) {
-	return store.Lease{}, store.ErrNotFound
+func (q *fakeQueue) ClaimCommand(context.Context, domain.Command, time.Duration, int) (store.Lease, error) {
+	return q.claimLease, q.claimErr
+}
+
+func (q *fakeQueue) Handoff(_ context.Context, _ store.Lease, job domain.Job) error {
+	q.stages = append(q.stages, job.Stage)
+	q.handoff = &job
+	return q.handoffErr
+}
+
+func processPipeline(w *Worker, ctx context.Context, lease store.Lease) {
+	if err := w.process(ctx, lease); err != nil {
+		return
+	}
+	if q, ok := w.queue.(*fakeQueue); ok && q.handoff != nil && q.failure == "" {
+		lease.Job = *q.handoff
+		q.handoff = nil
+		w.process(ctx, lease)
+	}
 }
 
 func (q *fakeQueue) Renew(context.Context, store.Lease, time.Duration) error {
@@ -47,7 +69,7 @@ func (q *fakeQueue) Complete(_ context.Context, _ store.Lease, clips []domain.Cl
 func (q *fakeQueue) Fail(_ context.Context, _ store.Lease, message string, retry bool, _ time.Duration, _ int) error {
 	q.failure = message
 	q.retry = retry
-	return nil
+	return q.failErr
 }
 
 type fakeMedia struct {
@@ -137,7 +159,7 @@ func testWorker(t *testing.T, queue *fakeQueue, media *fakeMedia, provider *fake
 	t.Helper()
 	return New(queue, media, provider, provider, nil, Config{
 		DataDir: t.TempDir(), LeaseDuration: time.Second, StageTimeout: time.Second,
-		MaxDuration: 1800, MaxAttempts: 3, Workers: 1,
+		MaxDuration: 1800, MaxAttempts: 3,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -153,7 +175,7 @@ func testLease(stage string) store.Lease {
 func TestPipelineCheckpointsAndCreatesOutput(t *testing.T) {
 	queue, media, provider := &fakeQueue{}, &fakeMedia{}, &fakeAI{}
 	w := testWorker(t, queue, media, provider)
-	w.process(context.Background(), testLease("probe"))
+	processPipeline(w, context.Background(), testLease("probe"))
 	if queue.failure != "" || !reflect.DeepEqual(queue.stages, []string{"transcribe", "select", "render"}) {
 		t.Fatalf("stages = %v, failure = %q", queue.stages, queue.failure)
 	}
@@ -188,7 +210,7 @@ func TestTransientAndPermanentFailures(t *testing.T) {
 			queue := &fakeQueue{}
 			w := testWorker(t, queue, &fakeMedia{}, &test.provider)
 			w.cfg.StageTimeout = 20 * time.Millisecond
-			w.process(context.Background(), testLease("transcribe"))
+			processPipeline(w, context.Background(), testLease("transcribe"))
 			if queue.failure == "" || queue.retry != test.wantRetry || len(queue.completed) != 0 {
 				t.Fatalf("failure=%q retry=%v completed=%v", queue.failure, queue.retry, queue.completed)
 			}
@@ -201,7 +223,7 @@ func TestLeaseLossCancelsRenderAndRemovesOutput(t *testing.T) {
 	media := &fakeMedia{blockRender: true}
 	w := testWorker(t, queue, media, &fakeAI{})
 	w.cfg.LeaseDuration = 30 * time.Millisecond
-	w.process(context.Background(), testLease("render"))
+	processPipeline(w, context.Background(), testLease("render"))
 	if queue.failure != "" || len(queue.completed) != 0 || len(media.paths) != 1 {
 		t.Fatalf("cancelled attempt changed state: %+v", queue)
 	}
@@ -223,7 +245,7 @@ func TestCompletionFencingAndUnknownCommit(t *testing.T) {
 			queue := &fakeQueue{completeErr: test.err}
 			media := &fakeMedia{}
 			w := testWorker(t, queue, media, &fakeAI{})
-			w.process(context.Background(), testLease("render"))
+			processPipeline(w, context.Background(), testLease("render"))
 			_, err := os.Stat(media.paths[0])
 			if (err == nil) != test.wantFile {
 				t.Fatalf("output existence error = %v, wantFile = %v", err, test.wantFile)
@@ -235,7 +257,7 @@ func TestCompletionFencingAndUnknownCommit(t *testing.T) {
 func TestRecoveryResumesAtSavedStage(t *testing.T) {
 	queue, media, provider := &fakeQueue{}, &fakeMedia{}, &fakeAI{}
 	w := testWorker(t, queue, media, provider)
-	w.process(context.Background(), testLease("select"))
+	processPipeline(w, context.Background(), testLease("select"))
 	if media.probes != 0 || media.extracts != 0 || provider.transcribes != 0 || provider.selects != 1 || media.renders != 1 || len(queue.completed) != 1 {
 		t.Fatalf("recovery reran completed work: media=%+v provider=%+v", media, provider)
 	}
@@ -258,7 +280,7 @@ func TestReexportPreservesPublishedFiles(t *testing.T) {
 	if err := os.WriteFile(orphan, []byte("orphan"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if media.renders != 1 || len(queue.completed) != 2 || !reflect.DeepEqual(queue.completed[1], old) {
 		t.Fatalf("reexport rerendered published clips: renders=%d, clips=%+v", media.renders, queue.completed)
 	}
@@ -276,7 +298,7 @@ func TestUnsupportedModeIsRejected(t *testing.T) {
 	w := testWorker(t, queue, &fakeMedia{}, provider)
 	lease := testLease("transcribe")
 	lease.Job.Mode = "unknown"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure == "" || queue.retry || provider.transcribes != 0 {
 		t.Fatalf("unsupported mode accepted: %+v", queue)
 	}
@@ -287,7 +309,7 @@ func TestSplitSkipsSpeechProvidersAndSubtitles(t *testing.T) {
 	w := testWorker(t, queue, media, provider)
 	lease := testLease("probe")
 	lease.Job.Mode = "split"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure != "" || !reflect.DeepEqual(queue.stages, []string{"select", "render"}) || len(queue.completed) != 3 {
 		t.Fatalf("split did not complete: %+v", queue)
 	}
@@ -306,7 +328,7 @@ func TestDemoUsesItsOwnProviders(t *testing.T) {
 	w := testWorker(t, queue, media, provider)
 	lease := testLease("probe")
 	lease.Job.Mode = "demo"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure != "" || len(queue.completed) != 3 || provider.transcribes != 0 || provider.selects != 0 || media.renderedSegments == 0 {
 		t.Fatalf("demo did not use its own providers: queue=%+v media=%+v provider=%+v", queue, media, provider)
 	}
@@ -323,7 +345,7 @@ func TestOpenAIRequiresConfiguredProviderOnlyForAIStages(t *testing.T) {
 			queue, media := &fakeQueue{}, &fakeMedia{}
 			w := testWorker(t, queue, media, &fakeAI{})
 			w.transcriber, w.selector = nil, nil
-			w.process(context.Background(), testLease(stage))
+			processPipeline(w, context.Background(), testLease(stage))
 			if stage == "render" {
 				if queue.failure != "" || len(queue.completed) != 1 {
 					t.Fatalf("saved render required an API key: %+v", queue)
@@ -416,7 +438,7 @@ func TestStaleCleanupCannotRemoveNewerLeaseFiles(t *testing.T) {
 func TestInvalidDurationIsPermanent(t *testing.T) {
 	queue := &fakeQueue{}
 	w := testWorker(t, queue, &fakeMedia{probeDuration: 1801}, &fakeAI{})
-	w.process(context.Background(), testLease("probe"))
+	processPipeline(w, context.Background(), testLease("probe"))
 	if queue.failure == "" || queue.retry || len(queue.stages) != 0 {
 		t.Fatalf("invalid input accepted: %+v", queue)
 	}

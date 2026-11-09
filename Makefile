@@ -1,4 +1,4 @@
-.PHONY: build test integration smoke run up down
+.PHONY: build test integration smoke kafka-smoke run up down
 
 build:
 	go build -o bin/clipforge ./cmd/clipforge
@@ -14,6 +14,9 @@ integration:
 
 smoke:
 	bash scripts/smoke.sh
+
+kafka-smoke:
+	python3 scripts/kafka-smoke.py
 
 run:
 	go run ./cmd/clipforge

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -16,6 +17,11 @@ import (
 )
 
 func testStore(t *testing.T) *Store {
+	t.Helper()
+	return testStoreVersion(t, false)
+}
+
+func testStoreVersion(t *testing.T, legacy bool) *Store {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -47,7 +53,12 @@ func testStore(t *testing.T) *Store {
 		}
 		admin.Close()
 	})
-	if err := Migrate(ctx, pool, "../../migrations/001_jobs.sql"); err != nil {
+	if legacy {
+		err = Migrate(ctx, pool, "../../migrations/001_jobs.sql")
+	} else {
+		err = MigrateAll(ctx, pool, "../../migrations")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	return New(pool)
@@ -64,11 +75,34 @@ func createJob(t *testing.T, s *Store) domain.Job {
 
 func claim(t *testing.T, s *Store, attempts int) Lease {
 	t.Helper()
-	lease, err := s.Claim(context.Background(), time.Minute, attempts)
+	lease, err := nextTestLease(context.Background(), s, attempts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return lease
+}
+
+func nextTestLease(ctx context.Context, s *Store, attempts int) (Lease, error) {
+	if err := s.RecoverExpired(ctx, attempts); err != nil {
+		return Lease{}, err
+	}
+	var payload []byte
+	err := s.pool.QueryRow(ctx, `SELECT o.payload FROM outbox o JOIN jobs j ON j.id = o.message_key
+		WHERE o.topic IN ('clipforge.analysis.v1', 'clipforge.render.v1')
+			AND o.payload->>'generation' = j.dispatch_generation::text
+			AND j.status = 'queued' AND j.available_at <= now() AND o.available_at <= now()
+		ORDER BY o.id LIMIT 1`).Scan(&payload)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Lease{}, ErrNotFound
+	}
+	if err != nil {
+		return Lease{}, err
+	}
+	var command domain.Command
+	if err := json.Unmarshal(payload, &command); err != nil {
+		return Lease{}, err
+	}
+	return s.ClaimCommand(ctx, command, time.Minute, attempts)
 }
 
 func expire(t *testing.T, s *Store, id string) {
@@ -81,8 +115,10 @@ func expire(t *testing.T, s *Store, id string) {
 func TestConcurrentClaims(t *testing.T) {
 	s := testStore(t)
 	const count = 24
+	commands := make([]domain.Command, 0, count)
 	for range count {
-		createJob(t, s)
+		job := createJob(t, s)
+		commands = append(commands, commandFor(t, s, job.ID, domain.AnalysisTopic))
 	}
 	claimed := make(chan string, count)
 	errorsFound := make(chan error, 8)
@@ -91,10 +127,10 @@ func TestConcurrentClaims(t *testing.T) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for {
-				lease, err := s.Claim(context.Background(), time.Minute, 3)
+			for _, command := range commands {
+				lease, err := s.ClaimCommand(context.Background(), command, time.Minute, 3)
 				if errors.Is(err, ErrNotFound) {
-					return
+					continue
 				}
 				if err != nil {
 					errorsFound <- err
@@ -169,7 +205,7 @@ func TestRecoveryHasBoundedAttempts(t *testing.T) {
 		}
 		expire(t, s, job.ID)
 	}
-	if _, err := s.Claim(context.Background(), time.Minute, 3); !errors.Is(err, ErrNotFound) {
+	if _, err := nextTestLease(context.Background(), s, 3); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("claim exhausted job = %v", err)
 	}
 	got, err := s.Get(context.Background(), job.ID)
@@ -197,10 +233,13 @@ func TestCheckpointAndDelayedRetry(t *testing.T) {
 	if err := s.Fail(ctx, lease, "temporary", true, time.Minute, 2); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Claim(ctx, time.Minute, 2); !errors.Is(err, ErrNotFound) {
+	if _, err := nextTestLease(ctx, s, 2); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("claimed before retry delay: %v", err)
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE jobs SET available_at = now() WHERE id = $1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE outbox SET available_at = now() WHERE message_key = $1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
 	previousToken := lease.Token

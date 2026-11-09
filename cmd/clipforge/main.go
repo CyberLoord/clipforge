@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/CyberLoord/clipforge/internal/media"
 	"github.com/CyberLoord/clipforge/internal/storage"
 	"github.com/CyberLoord/clipforge/internal/store"
+	"github.com/CyberLoord/clipforge/internal/stream"
 	"github.com/CyberLoord/clipforge/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -41,13 +42,13 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	startup, cancel := context.WithTimeout(ctx, 30*time.Second)
+	startup, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		return errors.New("invalid DATABASE_URL")
 	}
-	poolCfg.MaxConns = int32(cfg.Workers + 8)
+	poolCfg.MaxConns = int32(cfg.Workers + cfg.RenderWorkers + 16)
 	pool, err := pgxpool.NewWithConfig(startup, poolCfg)
 	if err != nil {
 		return errors.New("cannot create database pool")
@@ -56,12 +57,20 @@ func run(logger *slog.Logger) error {
 	if err = pool.Ping(startup); err != nil {
 		return errors.New("cannot connect to database")
 	}
-	if err = store.Migrate(startup, pool, filepath.Join(cfg.Migrations, "001_jobs.sql")); err != nil {
+	if err = store.MigrateAll(startup, pool, cfg.Migrations); err != nil {
 		return err
 	}
 	files, err := storage.New(cfg.DataDir)
 	if err != nil {
 		return err
+	}
+	broker, err := stream.New(stream.Config{Brokers: cfg.KafkaBrokers, GroupPrefix: cfg.KafkaGroupPrefix, Partitions: cfg.KafkaPartitions, ReplicationFactor: cfg.KafkaReplicationFactor, ProcessingTimeout: 3*cfg.StageTimeout + time.Minute}, logger)
+	if err != nil {
+		return err
+	}
+	defer broker.Close()
+	if err := broker.EnsureTopics(startup); err != nil {
+		return fmt.Errorf("initialize Kafka: %w", err)
 	}
 	repo := store.New(pool)
 	var transcriber ai.Transcriber
@@ -73,17 +82,29 @@ func run(logger *slog.Logger) error {
 		selector = provider
 		montage = ai.NewOpenAI(cfg.APIKey, cfg.BaseURL, cfg.VisionModel)
 	}
-	jobs := worker.New(repo, media.New(cfg.FFmpeg, cfg.FFprobe), transcriber, selector, montage, worker.Config{Workers: cfg.Workers, LeaseDuration: cfg.LeaseDuration, PollInterval: time.Second, StageTimeout: cfg.StageTimeout, MaxAttempts: cfg.MaxAttempts, MaxDuration: cfg.MaxDuration, DataDir: cfg.DataDir}, logger)
+	jobs := worker.New(repo, media.New(cfg.FFmpeg, cfg.FFprobe), transcriber, selector, montage, worker.Config{LeaseDuration: cfg.LeaseDuration, StageTimeout: cfg.StageTimeout, MaxAttempts: cfg.MaxAttempts, MaxDuration: cfg.MaxDuration, DataDir: cfg.DataDir}, logger)
 	workersDone := make(chan struct{})
-	go func() { defer close(workersDone); jobs.Run(ctx) }()
-	server := &http.Server{Addr: cfg.Address, Handler: httpapi.New(repo, files, cfg, logger, pool.Ping), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	backgroundResult := make(chan error, 1)
+	go func() {
+		defer close(workersDone)
+		backgroundResult <- runBackground(ctx, cfg, repo, broker, jobs, logger)
+	}()
+	ready := func(ctx context.Context) error {
+		if err := pool.Ping(ctx); err != nil {
+			return err
+		}
+		return broker.Ping(ctx)
+	}
+	server := &http.Server{Addr: cfg.Address, Handler: httpapi.New(repo, files, cfg, logger, ready), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 	serverDone := make(chan error, 1)
 	go func() {
-		logger.Info("server started", "addr", cfg.Address, "mode", cfg.Mode, "workers", cfg.Workers)
+		logger.Info("server started", "addr", cfg.Address, "mode", cfg.Mode, "role", cfg.Role, "analysis_workers", cfg.Workers, "render_workers", cfg.RenderWorkers)
 		serverDone <- server.ListenAndServe()
 	}()
 	select {
 	case <-ctx.Done():
+	case err = <-backgroundResult:
+		stop()
 	case err = <-serverDone:
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil

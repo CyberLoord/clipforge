@@ -38,7 +38,7 @@ func TestMontagePipeline(t *testing.T) {
 	w.montage = provider
 	lease := testLease("probe")
 	lease.Job.Mode = "montage"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure != "" || !reflect.DeepEqual(queue.stages, []string{"select", "render"}) || len(queue.completed) != 2 {
 		t.Fatalf("pipeline failed: %+v", queue)
 	}
@@ -62,7 +62,7 @@ func TestMontageRenderResumesWithoutProvider(t *testing.T) {
 		lease.Job.Clips[i].ID = domain.NewID()
 		lease.Job.Clips[i].Revision = 1
 	}
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure != "" || len(queue.completed) != 2 || media.samples != 0 || media.montages != 2 {
 		t.Fatalf("saved montage did not resume: queue=%+v media=%+v", queue, media)
 	}
@@ -73,7 +73,7 @@ func TestMontageNeedsProviderBeforeSampling(t *testing.T) {
 	w := testWorker(t, queue, media, &fakeAI{})
 	lease := testLease("select")
 	lease.Job.Mode = "montage"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if !strings.Contains(queue.failure, "OPENAI_API_KEY") || media.samples != 0 || queue.retry {
 		t.Fatalf("missing provider was not rejected: %+v", queue)
 	}
@@ -85,7 +85,7 @@ func TestMontageRejectsInvalidPlanBeforeRender(t *testing.T) {
 	w.montage = &fakeMontage{invalid: true}
 	lease := testLease("select")
 	lease.Job.Mode = "montage"
-	w.process(context.Background(), lease)
+	processPipeline(w, context.Background(), lease)
 	if queue.failure == "" || media.renders != 0 || len(queue.completed) != 0 {
 		t.Fatalf("invalid plan was rendered: %+v", queue)
 	}

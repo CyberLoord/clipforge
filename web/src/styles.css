@@ -1702,3 +1702,80 @@ main {
     transition-duration: 0.01ms !important;
   }
 }
+
+.job-history {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+}
+.job-history summary {
+  cursor: pointer;
+  padding: 17px 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.job-history summary:focus-visible {
+  outline: 3px solid #ec9c72;
+  outline-offset: 3px;
+}
+.job-history-content {
+  padding: 0 20px 18px;
+}
+.job-history-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 15px;
+}
+.job-history-toolbar button {
+  flex-shrink: 0;
+}
+.job-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.job-history-list li {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 18px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.job-history-list time {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+.job-history-attempt {
+  color: var(--muted);
+  font-size: 10px;
+}
+.job-history-list .job-history-error {
+  margin-top: 4px;
+  color: #a24428;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.job-history-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 0;
+}
+@media (max-width: 600px) {
+  .job-history-toolbar {
+    align-items: flex-start;
+  }
+  .job-history-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+}

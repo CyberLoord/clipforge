@@ -154,12 +154,12 @@ func TestMontagePipelineIntegration(t *testing.T) {
 	processor := media.New(ffmpeg, ffprobe)
 	provider := ai.NewOpenAI("integration-key", server.URL, "integration-vision")
 	w := New(queue, processor, unusedSpeech, unusedSpeech, provider, Config{
-		DataDir: dataDir, LeaseDuration: time.Minute, StageTimeout: time.Minute, Workers: 1,
+		DataDir: dataDir, LeaseDuration: time.Minute, StageTimeout: time.Minute,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	lease := store.Lease{Token: domain.NewID(), Job: domain.Job{
 		ID: domain.NewID(), Stage: "probe", Status: "running", Mode: "montage", Attempts: 1, SourcePath: source,
 	}}
-	w.process(ctx, lease)
+	processPipeline(w, ctx, lease)
 	if queue.failure != "" || !reflect.DeepEqual(queue.stages, []string{"select", "render"}) {
 		t.Fatalf("stages=%v failure=%q", queue.stages, queue.failure)
 	}

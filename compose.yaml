@@ -1,28 +1,92 @@
+x-app: &app
+  image: clipforge:local
+  build: .
+  environment: &environment
+    DATABASE_URL: postgres://clipforge:clipforge@db:5432/clipforge?sslmode=disable
+    KAFKA_BROKERS: kafka:9092
+    KAFKA_GROUP_PREFIX: clipforge
+    KAFKA_PARTITIONS: 3
+    KAFKA_REPLICATION_FACTOR: 1
+    AI_MODE: ${AI_MODE:-montage}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    OPENAI_SELECTION_MODEL: ${OPENAI_SELECTION_MODEL:-gpt-4.1-mini}
+    OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-5.6-terra}
+    WORKERS: ${WORKERS:-2}
+    RENDER_WORKERS: ${RENDER_WORKERS:-1}
+    MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-300}
+    MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-1800}
+    MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
+    STAGE_TIMEOUT: ${STAGE_TIMEOUT:-15m}
+    LEASE_DURATION: ${LEASE_DURATION:-30s}
+  volumes:
+    - media:/app/data
+  depends_on:
+    db:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  init: true
+  stop_grace_period: 30s
+  restart: unless-stopped
+
 services:
   app:
-    build: .
+    <<: *app
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      DATABASE_URL: postgres://clipforge:clipforge@db:5432/clipforge?sslmode=disable
-      AI_MODE: ${AI_MODE:-montage}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      OPENAI_SELECTION_MODEL: ${OPENAI_SELECTION_MODEL:-gpt-4.1-mini}
-      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-5.6-terra}
-      WORKERS: ${WORKERS:-2}
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-300}
-      MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-1800}
-      MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
-      STAGE_TIMEOUT: ${STAGE_TIMEOUT:-15m}
-      LEASE_DURATION: ${LEASE_DURATION:-30s}
+      <<: *environment
+      APP_ROLE: api
+  dispatcher:
+    <<: *app
+    environment:
+      <<: *environment
+      APP_ROLE: dispatcher
+  analysis:
+    <<: *app
+    environment:
+      <<: *environment
+      APP_ROLE: analysis
+  render:
+    <<: *app
+    environment:
+      <<: *environment
+      APP_ROLE: render
+  events:
+    <<: *app
+    environment:
+      <<: *environment
+      APP_ROLE: events
+  kafka:
+    image: apache/kafka:4.1.2
+    ports:
+      - "127.0.0.1:19092:19092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     volumes:
-      - media:/app/data
-    depends_on:
-      db:
-        condition: service_healthy
-    init: true
-    stop_grace_period: 30s
+      - kafka:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20s
+      retries: 15
     restart: unless-stopped
   db:
     image: postgres:18-alpine
@@ -41,3 +105,4 @@ services:
 volumes:
   media:
   postgres:
+  kafka:

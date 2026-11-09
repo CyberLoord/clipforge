@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/CyberLoord/clipforge/internal/domain"
@@ -209,24 +208,6 @@ func (s *Store) Reexport(ctx context.Context, id, clipID string, start, end floa
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-func (s *Store) Claim(ctx context.Context, duration time.Duration, maxAttempts int) (Lease, error) {
-	if _, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'failed', error = 'Worker stopped before the stage completed; retry limit reached.', lease_until = NULL, updated_at = now() WHERE status = 'running' AND lease_until <= now() AND attempts >= $1`, maxAttempts); err != nil {
-		return Lease{}, err
-	}
-	token := domain.NewID()
-	var previousToken string
-	returning := "jobs." + strings.ReplaceAll(columns, ", ", ", jobs.")
-	job, err := scanJob(s.pool.QueryRow(ctx, `WITH candidate AS (
-		SELECT id, lease_token AS previous_token FROM jobs
-		WHERE (status = 'queued' AND available_at <= now()) OR (status = 'running' AND lease_until <= now() AND attempts < $3)
-		ORDER BY available_at, created_at
-		FOR UPDATE SKIP LOCKED LIMIT 1
-	) UPDATE jobs SET status = 'running', attempts = jobs.attempts + 1, lease_token = $1,
-		lease_until = now() + $2 * interval '1 second', updated_at = now()
-		FROM candidate WHERE jobs.id = candidate.id RETURNING `+returning+`, candidate.previous_token`, token, duration.Seconds(), maxAttempts), &previousToken)
-	return Lease{Job: job, Token: token, PreviousToken: previousToken}, err
 }
 
 func (s *Store) Renew(ctx context.Context, lease Lease, duration time.Duration) error {

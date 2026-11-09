@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/CyberLoord/clipforge/internal/domain"
@@ -14,24 +15,30 @@ import (
 )
 
 type Config struct {
-	Address        string
-	DatabaseURL    string
-	DataDir        string
-	WebDir         string
-	Migrations     string
-	Mode           string
-	APIKey         string
-	BaseURL        string
-	Model          string
-	VisionModel    string
-	FFmpeg         string
-	FFprobe        string
-	Workers        int
-	MaxAttempts    int
-	MaxUploadBytes int64
-	MaxDuration    float64
-	StageTimeout   time.Duration
-	LeaseDuration  time.Duration
+	Role                   string
+	KafkaBrokers           []string
+	KafkaGroupPrefix       string
+	KafkaPartitions        int
+	KafkaReplicationFactor int
+	RenderWorkers          int
+	Address                string
+	DatabaseURL            string
+	DataDir                string
+	WebDir                 string
+	Migrations             string
+	Mode                   string
+	APIKey                 string
+	BaseURL                string
+	Model                  string
+	VisionModel            string
+	FFmpeg                 string
+	FFprobe                string
+	Workers                int
+	MaxAttempts            int
+	MaxUploadBytes         int64
+	MaxDuration            float64
+	StageTimeout           time.Duration
+	LeaseDuration          time.Duration
 }
 
 func Load() (Config, error) {
@@ -39,20 +46,46 @@ func Load() (Config, error) {
 		return Config{}, errors.New("не удалось прочитать .env; проверьте формат KEY=value")
 	}
 	c := Config{
-		Address:     env("ADDR", "127.0.0.1:8080"),
-		DatabaseURL: env("DATABASE_URL", "postgres://clipforge:clipforge@localhost:5432/clipforge?sslmode=disable"),
-		DataDir:     env("DATA_DIR", "data"),
-		WebDir:      env("WEB_DIR", "web/dist"),
-		Migrations:  env("MIGRATIONS_DIR", "migrations"),
-		Mode:        env("AI_MODE", "montage"),
-		APIKey:      os.Getenv("OPENAI_API_KEY"),
-		BaseURL:     env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		Model:       env("OPENAI_SELECTION_MODEL", "gpt-4.1-mini"),
-		VisionModel: env("OPENAI_VISION_MODEL", "gpt-5.6-terra"),
-		FFmpeg:      env("FFMPEG_PATH", "ffmpeg"),
-		FFprobe:     env("FFPROBE_PATH", "ffprobe"),
+		Role:             env("APP_ROLE", "all"),
+		KafkaBrokers:     strings.Split(env("KAFKA_BROKERS", "127.0.0.1:9092"), ","),
+		KafkaGroupPrefix: env("KAFKA_GROUP_PREFIX", "clipforge"),
+		Address:          env("ADDR", "127.0.0.1:8080"),
+		DatabaseURL:      env("DATABASE_URL", "postgres://clipforge:clipforge@localhost:5432/clipforge?sslmode=disable"),
+		DataDir:          env("DATA_DIR", "data"),
+		WebDir:           env("WEB_DIR", "web/dist"),
+		Migrations:       env("MIGRATIONS_DIR", "migrations"),
+		Mode:             env("AI_MODE", "montage"),
+		APIKey:           os.Getenv("OPENAI_API_KEY"),
+		BaseURL:          env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		Model:            env("OPENAI_SELECTION_MODEL", "gpt-4.1-mini"),
+		VisionModel:      env("OPENAI_VISION_MODEL", "gpt-5.6-terra"),
+		FFmpeg:           env("FFMPEG_PATH", "ffmpeg"),
+		FFprobe:          env("FFPROBE_PATH", "ffprobe"),
+	}
+	switch c.Role {
+	case "all", "api", "dispatcher", "analysis", "render", "events":
+	default:
+		return c, errors.New("APP_ROLE must be all, api, dispatcher, analysis, render or events")
+	}
+	for i, broker := range c.KafkaBrokers {
+		c.KafkaBrokers[i] = strings.TrimSpace(broker)
+		if c.KafkaBrokers[i] == "" || strings.ContainsAny(c.KafkaBrokers[i], "/@ ") {
+			return c, errors.New("KAFKA_BROKERS must contain comma-separated host:port addresses")
+		}
+	}
+	if len(c.KafkaGroupPrefix) > 100 || strings.ContainsAny(c.KafkaGroupPrefix, " \t\r\n/") {
+		return c, errors.New("invalid KAFKA_GROUP_PREFIX")
 	}
 	var err error
+	if c.KafkaPartitions, err = integer("KAFKA_PARTITIONS", 3, 1, 64); err != nil {
+		return c, err
+	}
+	if c.KafkaReplicationFactor, err = integer("KAFKA_REPLICATION_FACTOR", 1, 1, 5); err != nil {
+		return c, err
+	}
+	if c.RenderWorkers, err = integer("RENDER_WORKERS", 1, 1, 32); err != nil {
+		return c, err
+	}
 	if c.Workers, err = integer("WORKERS", 2, 1, 32); err != nil {
 		return c, err
 	}

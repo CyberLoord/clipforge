@@ -26,6 +26,11 @@ type fakeRepo struct {
 	createError        error
 	persistBeforeError bool
 	reprocessError     error
+	events             []domain.JobEvent
+	eventsError        error
+	eventsRequested    string
+	deadLetters        []domain.DeadLetter
+	deadLettersError   error
 }
 
 func (f *fakeRepo) Create(_ context.Context, j *domain.Job) error {
@@ -39,11 +44,20 @@ func (f *fakeRepo) Create(_ context.Context, j *domain.Job) error {
 	return nil
 }
 func (f *fakeRepo) List(context.Context) ([]domain.Job, error) { return f.jobs, nil }
-func (f *fakeRepo) Get(context.Context, string) (domain.Job, error) {
-	if len(f.jobs) == 0 {
-		return domain.Job{}, store.ErrNotFound
+func (f *fakeRepo) Get(_ context.Context, id string) (domain.Job, error) {
+	for _, job := range f.jobs {
+		if job.ID == id {
+			return job, nil
+		}
 	}
-	return f.jobs[0], nil
+	return domain.Job{}, store.ErrNotFound
+}
+func (f *fakeRepo) Events(_ context.Context, id string) ([]domain.JobEvent, error) {
+	f.eventsRequested = id
+	return f.events, f.eventsError
+}
+func (f *fakeRepo) DeadLetters(context.Context) ([]domain.DeadLetter, error) {
+	return f.deadLetters, f.deadLettersError
 }
 func (f *fakeRepo) Cancel(context.Context, string) error { return nil }
 func (f *fakeRepo) Reprocess(_ context.Context, id, mode string) error {

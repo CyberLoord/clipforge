@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/CyberLoord/clipforge/internal/ai"
@@ -26,7 +25,8 @@ type Media interface {
 }
 
 type Queue interface {
-	Claim(context.Context, time.Duration, int) (store.Lease, error)
+	ClaimCommand(context.Context, domain.Command, time.Duration, int) (store.Lease, error)
+	Handoff(context.Context, store.Lease, domain.Job) error
 	Renew(context.Context, store.Lease, time.Duration) error
 	Checkpoint(context.Context, store.Lease, domain.Job) error
 	Complete(context.Context, store.Lease, []domain.Clip) error
@@ -34,9 +34,7 @@ type Queue interface {
 }
 
 type Config struct {
-	Workers       int
 	LeaseDuration time.Duration
-	PollInterval  time.Duration
 	StageTimeout  time.Duration
 	MaxAttempts   int
 	MaxDuration   float64
@@ -54,14 +52,8 @@ type Worker struct {
 }
 
 func New(queue Queue, media Media, transcriber ai.Transcriber, selector ai.Selector, montage ai.MontageSelector, cfg Config, logger *slog.Logger) *Worker {
-	if cfg.Workers < 1 {
-		cfg.Workers = 1
-	}
 	if cfg.LeaseDuration <= 0 {
 		cfg.LeaseDuration = time.Minute
-	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = time.Second
 	}
 	if cfg.StageTimeout <= 0 {
 		cfg.StageTimeout = 10 * time.Minute
@@ -78,35 +70,15 @@ func New(queue Queue, media Media, transcriber ai.Transcriber, selector ai.Selec
 	return &Worker{queue: queue, media: media, transcriber: transcriber, selector: selector, montage: montage, cfg: cfg, log: logger}
 }
 
-func (w *Worker) Run(ctx context.Context) {
-	var workers sync.WaitGroup
-	for range w.cfg.Workers {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			w.loop(ctx)
-		}()
+func (w *Worker) Handle(ctx context.Context, command domain.Command) error {
+	lease, err := w.queue.ClaimCommand(ctx, command, w.cfg.LeaseDuration, w.cfg.MaxAttempts)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
 	}
-	workers.Wait()
-}
-
-func (w *Worker) loop(ctx context.Context) {
-	for ctx.Err() == nil {
-		lease, err := w.queue.Claim(ctx, w.cfg.LeaseDuration, w.cfg.MaxAttempts)
-		if err == nil {
-			w.process(ctx, lease)
-			continue
-		}
-		if !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
-			w.log.Error("claim failed", "error", err)
-		}
-		timer := time.NewTimer(w.cfg.PollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
-		}
+	if err != nil {
+		return err
 	}
+	return w.process(ctx, lease)
 }
 
 func (w *Worker) heartbeat(ctx context.Context, cancel context.CancelFunc, lease store.Lease, done chan<- struct{}) {
@@ -133,7 +105,7 @@ func (w *Worker) heartbeat(ctx context.Context, cancel context.CancelFunc, lease
 	}
 }
 
-func (w *Worker) process(parent context.Context, lease store.Lease) {
+func (w *Worker) process(parent context.Context, lease store.Lease) error {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	go w.heartbeat(ctx, cancel, lease, done)
@@ -170,7 +142,12 @@ func (w *Worker) process(parent context.Context, lease store.Lease) {
 				if err == nil {
 					committed = true
 					w.log.Info("job completed", "job_id", job.ID)
-					return
+					return nil
+				}
+			} else if job.Stage == "render" {
+				err = w.queue.Handoff(ctx, lease, job)
+				if err == nil {
+					return nil
 				}
 			} else {
 				err = w.queue.Checkpoint(ctx, lease, job)
@@ -179,18 +156,27 @@ func (w *Worker) process(parent context.Context, lease store.Lease) {
 					continue
 				}
 			}
+			if errors.Is(err, store.ErrLeaseLost) {
+				return nil
+			}
+			return err
 		}
-		if ctx.Err() != nil || errors.Is(err, store.ErrLeaseLost) {
-			return
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, store.ErrLeaseLost) {
+			return nil
 		}
 		retry := ai.IsTemporary(err)
 		delay := time.Second * time.Duration(1<<min(max(job.Attempts-1, 0), 5))
 		if failErr := w.queue.Fail(ctx, lease, fmt.Sprintf("%s: %v", stage, err), retry, delay, w.cfg.MaxAttempts); failErr != nil && !errors.Is(failErr, store.ErrLeaseLost) {
 			w.log.Error("save failure failed", "job_id", job.ID, "error", failErr)
+			return failErr
 		}
 		w.log.Warn("stage failed", "job_id", job.ID, "stage", stage, "retryable", retry, "error", err)
-		return
+		return nil
 	}
+	return ctx.Err()
 }
 
 func (w *Worker) cleanupAbandoned(job domain.Job, previousToken string) {
