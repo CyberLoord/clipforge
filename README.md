@@ -6,7 +6,7 @@ ClipForge собирает короткие ролики из загруженн
 
 ![Варианты монтажа с предпросмотром](docs/screenshots/edits.png)
 
-Пример на трейлере Sintel с подготовленным вручную монтажным планом. [Материалы скриншотов](docs/screenshots/README.md).
+Кадры из трейлера Sintel, © Blender Foundation, CC BY 3.0. Монтажный план для примера задан вручную.
 
 ![Загрузка MP4 и выбор способа обработки](docs/screenshots/upload.png)
 
@@ -24,7 +24,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Открыть [localhost:8080](http://localhost:8080). Если ключ добавлен уже после запуска:
+Приложение будет на `localhost:8080`. Если ключ добавлен уже после запуска:
 
 ```sh
 docker compose up -d --force-recreate app analysis
@@ -35,22 +35,3 @@ docker compose up -d --force-recreate app analysis
 Backend — Go, интерфейс — React. PostgreSQL хранит задания и результаты этапов, файлы лежат в общем volume. Kafka разделяет анализ и рендер между воркерами; ещё две группы записывают историю обработки и ошибки.
 
 Задание и сообщение сохраняются одной транзакцией через outbox. При повторной доставке воркер проверяет поколение команды и аренду задания.
-
-[Схема Kafka, повторы и replay истории](docs/kafka.md) · [Архитектура и ограничения](docs/architecture.md)
-
-## Проверка
-
-```sh
-make test
-```
-
-Проверки работающего Compose без ключа OpenAI:
-
-```sh
-make smoke
-make kafka-smoke
-```
-
-Второй сценарий останавливает Kafka, проверяет восстановление доставки, DLQ и повторное чтение истории. Для тестов хранилища и брокера нужны отдельные PostgreSQL и Kafka — настройка описана в [руководстве по разработке](docs/development.md#тесты).
-
-[HTTP API](docs/api.md) · [Локальный запуск и настройки](docs/development.md)
