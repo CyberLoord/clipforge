@@ -7,7 +7,6 @@ import { Icon } from "./Icon";
 import { ClipCard } from "./ClipCard";
 import { ModePicker } from "./ModePicker";
 import { DemoNotice } from "./DemoNotice";
-import { JobHistory } from "./JobHistory";
 
 export const statusLabels: Record<JobStatus, string> = {
   queued: "В очереди",
@@ -126,12 +125,6 @@ export function JobDetail({
             segment.end > selected.start && segment.start < selected.end,
         )
       : transcript;
-  const created = new Intl.DateTimeFormat("ru", {
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(job.created_at));
 
   async function perform(name: "cancel" | "retry") {
     setAction(name);
@@ -180,22 +173,34 @@ export function JobDetail({
           <div className="eyebrow">Исходный файл</div>
           <h1 title={job.filename}>{job.filename}</h1>
           <p className="job-meta">
-            {created}
             {job.duration > 0 && (
               <>
-                {" "}
-                <span>·</span> {timestamp(job.duration)}
+                {timestamp(job.duration)} <span>·</span>
               </>
             )}
-            <span>·</span> {modeLabels[job.mode]}
+            {modeLabels[job.mode]}
           </p>
         </div>
-        {job.status !== "completed" && (
-          <span className={`status-pill status-${job.status}`}>
-            <span className="status-dot" />
-            {statusLabels[job.status]}
-          </span>
-        )}
+        <div className="job-actions">
+          {job.status !== "completed" && (
+            <span className={`status-pill status-${job.status}`}>
+              <span className="status-dot" />
+              {statusLabels[job.status]}
+            </span>
+          )}
+          {!active && (
+            <button
+              className="button secondary small"
+              onClick={() => setReprocessing(!reprocessing)}
+              aria-expanded={reprocessing}
+              aria-controls="reprocess-form"
+              disabled={!!action}
+            >
+              <Icon name="scissors" size={15} />
+              {montage ? "Собрать заново" : "Создать эдиты"}
+            </button>
+          )}
+        </div>
       </div>
       {job.mode === "demo" && <DemoNotice />}
       {active && (
@@ -279,57 +284,43 @@ export function JobDetail({
           </button>
         </section>
       )}
-      {!active && (
-        <section className="reprocess-panel">
-          <div className="reprocess-heading">
-            <p>Исходник сохранён. Можно изменить режим обработки.</p>
+      {!active && reprocessing && (
+        <section
+          className="reprocess-form"
+          id="reprocess-form"
+          aria-label="Повторная обработка"
+        >
+          <ModePicker
+            config={config}
+            value={nextMode}
+            onChange={setNextMode}
+            disabled={!!action}
+          />
+          {nextMode === "demo" && <DemoNotice />}
+          <p className="reprocess-hint">
+            Текущие результаты будут заменены. Исходный файл сохранится.
+          </p>
+          <div className="reprocess-actions">
             <button
-              className="button secondary small"
-              onClick={() => setReprocessing(!reprocessing)}
-              aria-expanded={reprocessing}
+              className="button primary small"
+              onClick={reprocess}
+              disabled={!!action || !availableModes(config).includes(nextMode)}
+            >
+              {action === "reprocess"
+                ? "Запускаем…"
+                : nextMode === "montage"
+                  ? "Создать эдиты"
+                  : "Начать нарезку"}
+              <Icon name="arrow" size={15} />
+            </button>
+            <button
+              className="text-button muted"
+              onClick={() => setReprocessing(false)}
               disabled={!!action}
             >
-              <Icon name="scissors" size={15} />
-              {montage ? "Собрать заново" : "Создать эдиты"}
+              Закрыть
             </button>
           </div>
-          {reprocessing && (
-            <div className="reprocess-form">
-              <ModePicker
-                config={config}
-                value={nextMode}
-                onChange={setNextMode}
-                disabled={!!action}
-              />
-              {nextMode === "demo" && <DemoNotice />}
-              <p className="reprocess-hint">
-                Текущие результаты будут заменены. Исходный файл сохранится.
-              </p>
-              <div className="reprocess-actions">
-                <button
-                  className="button primary small"
-                  onClick={reprocess}
-                  disabled={
-                    !!action || !availableModes(config).includes(nextMode)
-                  }
-                >
-                  {action === "reprocess"
-                    ? "Запускаем…"
-                    : nextMode === "montage"
-                      ? "Создать эдиты"
-                      : "Начать нарезку"}
-                  <Icon name="arrow" size={15} />
-                </button>
-                <button
-                  className="text-button muted"
-                  onClick={() => setReprocessing(false)}
-                  disabled={!!action}
-                >
-                  Закрыть
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       )}
       {error && (
@@ -356,12 +347,6 @@ export function JobDetail({
                     : "Фрагменты по смыслу с субтитрами · MP4"}
             </p>
           </div>
-          {job.status === "completed" && (
-            <span className="complete-note">
-              <Icon name="check" size={15} />
-              Экспорт завершён
-            </span>
-          )}
         </div>
         {clips.length > 0 ? (
           <div className="clips-grid">
@@ -460,7 +445,6 @@ export function JobDetail({
           )}
         </section>
       )}
-      <JobHistory key={job.id} job={job} />
     </div>
   );
 }

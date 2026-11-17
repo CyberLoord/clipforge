@@ -189,23 +189,6 @@ export function Upload({
             disabled={progress !== null}
           />
           {mode === "demo" && <DemoNotice />}
-          <div className="export-specs">
-            <h2>Формат результата</h2>
-            <dl>
-              <div>
-                <dt>Контейнер</dt>
-                <dd>MP4 · H.264</dd>
-              </div>
-              <div>
-                <dt>Размер кадра</dt>
-                <dd>540 × 960</dd>
-              </div>
-              <div>
-                <dt>Длительность</dt>
-                <dd>{config.min_clip_seconds}–{config.max_clip_seconds} сек.</dd>
-              </div>
-            </dl>
-          </div>
         </aside>
       </div>
       <p className="upload-footnote">
