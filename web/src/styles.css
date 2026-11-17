@@ -261,13 +261,6 @@ main:focus {
   color: var(--muted);
 }
 
-.history-mode {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #89919f;
-}
-
 .status-dot {
   display: inline-block;
   flex-shrink: 0;
@@ -275,10 +268,6 @@ main:focus {
   height: 5px;
   border-radius: 50%;
   background: #858e9b;
-}
-
-.status-completed .status-dot, .status-dot.connected {
-  background: var(--green);
 }
 
 .status-running .status-dot, .status-queued .status-dot {
@@ -366,15 +355,6 @@ main:focus {
 
 .breadcrumb-separator {
   color: #576170;
-}
-
-.mode-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #a5afbd;
-  white-space: nowrap;
-  font-size: 11px;
 }
 
 main {
@@ -1514,7 +1494,7 @@ progress::-moz-progress-bar {
   .brand {
     font-size: 16px;
   }
-  .history-file-icon, .history-mode, .version {
+  .history-file-icon, .version {
     display: none;
   }
   .upload-workspace {
@@ -1616,9 +1596,6 @@ progress::-moz-progress-bar {
   }
   .topbar > div {
     gap: 7px;
-  }
-  .mode-label {
-    font-size: 10px;
   }
   main {
     padding: 22px 16px 32px;

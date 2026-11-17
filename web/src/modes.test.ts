@@ -6,7 +6,7 @@ test("montage stays selected when AI is not configured", () => {
   const available = availableModes({ available_modes: ["split", "demo"] });
   assert.equal(initialMode(), "montage");
   assert.equal(available.includes(initialMode()), false);
-  assert.equal(modeLabels.montage, "Эдиты · AI");
+  assert.equal(modeLabels.montage, "Монтаж");
 });
 
 test("montage is enabled only by server availability", () => {

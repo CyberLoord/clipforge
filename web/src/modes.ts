@@ -1,9 +1,9 @@
 import type { Config, Mode } from "./types";
 
 export const modeLabels: Record<Mode, string> = {
-  montage: "Эдиты · AI",
+  montage: "Монтаж",
   split: "По времени",
-  openai: "По речи · AI",
+  openai: "По речи",
   demo: "Демо",
 };
 

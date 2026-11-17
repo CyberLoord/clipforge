@@ -4,7 +4,7 @@ import { Icon } from "./components/Icon";
 import { JobDetail, statusLabels } from "./components/JobDetail";
 import { Upload } from "./components/Upload";
 import type { Config, Job } from "./types";
-import { modeLabels } from "./modes";
+import { timestamp } from "./timing";
 
 function selectedJobID() {
   try {
@@ -173,13 +173,16 @@ export function App() {
                   <span className="history-filename" title={item.filename}>
                     {item.filename}
                   </span>
-                  <span className={`history-status status-${item.status}`}>
-                    <span className="status-dot" />
-                    {statusLabels[item.status]}
-                    <span className="history-mode">
-                      · {modeLabels[item.mode]}
+                  {item.status === "completed" ? (
+                    <span className="history-status">
+                      {timestamp(item.duration)}
                     </span>
-                  </span>
+                  ) : (
+                    <span className={`history-status status-${item.status}`}>
+                      <span className="status-dot" />
+                      {statusLabels[item.status]}
+                    </span>
+                  )}
                 </span>
                 {selectedID === item.id && (
                   <span className="history-selected-mark" />
@@ -216,16 +219,6 @@ export function App() {
             <span className="breadcrumb-separator">/</span>
             <span>{selectedID ? "Результаты" : "Новое видео"}</span>
           </div>
-          <span className="mode-label">
-            <span
-              className={`status-dot ${currentJob?.mode === "openai" || currentJob?.mode === "montage" ? "connected" : ""}`}
-            />
-            {currentJob
-              ? modeLabels[currentJob.mode]
-              : config
-                ? "Выбор режима"
-                : "Подключение"}
-          </span>
         </header>
         <main id="main-content" tabIndex={-1}>
           {!config ? (

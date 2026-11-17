@@ -190,10 +190,12 @@ export function JobDetail({
             <span>·</span> {modeLabels[job.mode]}
           </p>
         </div>
-        <span className={`status-pill status-${job.status}`}>
-          <span className="status-dot" />
-          {statusLabels[job.status]}
-        </span>
+        {job.status !== "completed" && (
+          <span className={`status-pill status-${job.status}`}>
+            <span className="status-dot" />
+            {statusLabels[job.status]}
+          </span>
+        )}
       </div>
       {job.mode === "demo" && <DemoNotice />}
       {active && (
@@ -339,7 +341,7 @@ export function JobDetail({
         <div className="section-heading">
           <div>
             <h2>
-              {montage ? "Варианты эдита" : "Фрагменты"}{" "}
+              {montage ? "Варианты" : "Фрагменты"}{" "}
               <span className="count">
                 {clips.length}
               </span>
