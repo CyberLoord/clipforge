@@ -20,7 +20,7 @@ export function ModePicker({
 
   return (
     <fieldset className="mode-picker" disabled={disabled}>
-      <legend>Что собрать из видео</legend>
+      <legend>Режим</legend>
       <label
         className={`mode-option montage-option ${value === "montage" ? "selected" : ""}`}
       >
@@ -35,12 +35,9 @@ export function ModePicker({
         <span>
           <strong>{modeLabels.montage}</strong>
           <span>
-            Анализ кадров и монтаж интересных моментов. 2–3 варианта с разным
-            темпом и последовательностью сцен.
+            Выбор сцен по кадрам. Несколько вариантов монтажа из одного видео.
           </span>
-          <span className="edit-styles">
-            Динамичный · Кинематографичный · История
-          </span>
+          <span className="edit-styles">2–3 эдита · исходный звук</span>
         </span>
       </label>
       {!hasMontage && value === "montage" && (
@@ -55,7 +52,7 @@ export function ModePicker({
               <pre>OPENAI_API_KEY=ваш_ключ</pre>
               <p>Перезапустите сервер и обновите страницу.</p>
               <p>При запуске через Docker:</p>
-              <pre>docker compose up -d --force-recreate app</pre>
+              <pre>docker compose up -d --force-recreate app analysis</pre>
             </div>
           </details>
         </div>

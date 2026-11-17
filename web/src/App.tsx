@@ -135,20 +135,17 @@ export function App() {
       <aside className="sidebar">
         <a href="#" className="brand" aria-label="Clipforge, загрузить видео">
           <span className="brand-mark">
-            <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
-              <path d="M14 10h5v7h7v6h-7v7h-5V10Z" fill="currentColor" />
-              <path d="M24 10h4v4h-4zM24 26h4v4h-4z" fill="currentColor" />
-            </svg>
+            <Icon name="film" size={20} />
           </span>
-          clipforge<span className="brand-period">.</span>
+          ClipForge
         </a>
         <a href="#" className={`new-video ${!selectedID ? "active" : ""}`}>
           <Icon name="plus" size={18} />
           Новое видео
         </a>
         <div className="history-heading">
-          <h2>ИСТОРИЯ</h2>
-          <span>{jobs.length.toString().padStart(2, "0")}</span>
+          <h2>Видео</h2>
+          <span>{jobs.length}</span>
         </div>
         <nav className="history-list" aria-label="История заданий">
           {historyLoading ? (
@@ -207,7 +204,7 @@ export function App() {
             <Icon name="scissors" size={17} />
           </span>
           <div>
-            Личная мастерская<span>Видео → эдиты</span>
+            Локальное хранилище<span>Исходники и результаты</span>
           </div>
           <span className="version">v0.1</span>
         </div>
@@ -215,7 +212,7 @@ export function App() {
       <div className="main-shell">
         <header className="topbar">
           <div>
-            <span className="breadcrumb-root">Мастерская</span>
+            <span className="breadcrumb-root">Видео</span>
             <span className="breadcrumb-separator">/</span>
             <span>{selectedID ? "Результаты" : "Новое видео"}</span>
           </div>
@@ -247,7 +244,7 @@ export function App() {
             ) : (
               <div className="page-loading" role="status">
                 <div className="spinner" />
-                Загружаем мастерскую…
+                Загрузка…
               </div>
             )
           ) : selectedID ? (
@@ -283,10 +280,6 @@ export function App() {
             <Upload config={config} onCreated={createdJob} />
           )}
         </main>
-        <footer className="main-footer">
-          <span>clipforge</span>
-          <span>Загрузить. Выбрать. Сохранить.</span>
-        </footer>
       </div>
     </div>
   );

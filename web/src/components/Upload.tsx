@@ -73,173 +73,140 @@ export function Upload({
 
   return (
     <section className="upload-page">
-      <div className="eyebrow">ВИДЕОМАСТЕРСКАЯ</div>
-      <h1>
-        Ваше видео.
-        <br />
-        <span>{montage ? "Несколько эдитов." : "Короткие фрагменты."}</span>
-      </h1>
-      <p className="intro">
-        {montage
-          ? "Clipforge выбирает интересные моменты по кадрам и склеивает их в короткие ролики. Из одного видео — несколько вариантов монтажа."
-          : mode === "split"
-            ? "Видео до 135 секунд делится на три равные части. Для более длинного — три фрагмента по 45 секунд. В клипах сохраняется исходный звук."
-            : mode === "openai"
-              ? "Загрузите запись с речью. Clipforge распознает текст, выберет до трёх фрагментов по смыслу и добавит субтитры."
-              : "Проверка экспорта на вашем видео с готовой тестовой расшифровкой."}
-      </p>
-      <ModePicker
-        config={config}
-        value={mode}
-        onChange={setMode}
-        disabled={progress !== null}
-      />
-      {mode === "demo" && <DemoNotice />}
-      <div
-        className={`dropzone ${dragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          dragDepth.current++;
-          if (progress === null) setDragging(true);
-        }}
-        onDragLeave={(event) => {
-          event.preventDefault();
-          dragDepth.current--;
-          if (dragDepth.current === 0) setDragging(false);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          dragDepth.current = 0;
-          setDragging(false);
-          if (event.dataTransfer.files.length > 1) {
-            setError("Загружайте по одному видео за раз.");
-            return;
-          }
-          selectFile(event.dataTransfer.files[0]);
-        }}
-      >
-        <div className="upload-symbol">
-          <Icon name={file ? "film" : "upload"} size={28} />
-        </div>
-        {file ? (
-          <>
-            <h2 className="selected-filename">{file.name}</h2>
-            <p>{(file.size / 1024 / 1024).toFixed(1)} МБ · MP4</p>
-          </>
-        ) : (
-          <>
-            <h2>Перетащите видео сюда</h2>
-            <p>
-              MP4 · до {maxMB} МБ · от {config.min_video_seconds ?? 15} секунд
-              до {maxMinutes} минут
-            </p>
-          </>
-        )}
-        <input
-          ref={input}
-          type="file"
-          accept=".mp4,video/mp4"
-          className="visually-hidden"
-          tabIndex={-1}
-          aria-label="Выбрать MP4 видео"
-          disabled={progress !== null}
-          onChange={(event) => {
-            selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
-        />
-        {progress === null ? (
-          <div className="upload-actions">
-            <button
-              className={file ? "button secondary" : "button primary"}
-              onClick={() => input.current?.click()}
-            >
-              {file ? "Другой файл" : "Выбрать файл"}
-              {!file && <Icon name="plus" size={18} />}
-            </button>
-            {file && (
-              <button
-                className="button primary"
-                onClick={submit}
-                disabled={!available}
-              >
-                {montage ? "Создать эдиты" : "Нарезать видео"}
-                <Icon name="arrow" size={18} />
-              </button>
+      <header className="upload-heading">
+        <h1>Новое видео</h1>
+        <p className="intro">Загрузите исходник и выберите способ обработки.</p>
+      </header>
+      <div className="upload-workspace">
+        <div className="upload-source">
+          <div className="panel-label">Исходный файл</div>
+          <div
+            className={`dropzone ${dragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              dragDepth.current++;
+              if (progress === null) setDragging(true);
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              dragDepth.current--;
+              if (dragDepth.current === 0) setDragging(false);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              dragDepth.current = 0;
+              setDragging(false);
+              if (event.dataTransfer.files.length > 1) {
+                setError("Загружайте по одному видео за раз.");
+                return;
+              }
+              selectFile(event.dataTransfer.files[0]);
+            }}
+          >
+            <div className="upload-symbol">
+              <Icon name={file ? "film" : "upload"} size={28} />
+            </div>
+            {file ? (
+              <>
+                <h2 className="selected-filename">{file.name}</h2>
+                <p>{(file.size / 1024 / 1024).toFixed(1)} МБ · MP4</p>
+              </>
+            ) : (
+              <>
+                <h2>Перетащите видео сюда</h2>
+                <p>
+                  MP4 · до {maxMB} МБ · от {config.min_video_seconds ?? 15} секунд
+                  до {maxMinutes} минут
+                </p>
+              </>
+            )}
+            <input
+              ref={input}
+              type="file"
+              accept=".mp4,video/mp4"
+              className="visually-hidden"
+              tabIndex={-1}
+              aria-label="Выбрать MP4 видео"
+              disabled={progress !== null}
+              onChange={(event) => {
+                selectFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            {progress === null ? (
+              <div className="upload-actions">
+                <button
+                  className={file ? "button secondary" : "button primary"}
+                  onClick={() => input.current?.click()}
+                >
+                  {file ? "Другой файл" : "Выбрать файл"}
+                  {!file && <Icon name="plus" size={18} />}
+                </button>
+                {file && (
+                  <button
+                    className="button primary"
+                    onClick={submit}
+                    disabled={!available}
+                  >
+                    {montage ? "Создать эдиты" : "Нарезать видео"}
+                    <Icon name="arrow" size={18} />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="upload-progress">
+                <div className="progress-caption" role="status">
+                  <span>
+                    {progress === 100
+                      ? "Сервер принимает видео…"
+                      : "Загружаем видео"}
+                  </span>
+                  <span>{progress}%</span>
+                </div>
+                <progress value={progress} max="100" aria-label="Загрузка видео" />
+                <button
+                  className="text-button"
+                  onClick={() => operation.current?.abort()}
+                >
+                  Отменить загрузку
+                </button>
+              </div>
             )}
           </div>
-        ) : (
-          <div className="upload-progress">
-            <div className="progress-caption" role="status">
-              <span>
-                {progress === 100
-                  ? "Сервер принимает видео…"
-                  : "Загружаем видео"}
-              </span>
-              <span>{progress}%</span>
-            </div>
-            <progress value={progress} max="100" aria-label="Загрузка видео" />
-            <button
-              className="text-button"
-              onClick={() => operation.current?.abort()}
-            >
-              Отменить загрузку
-            </button>
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+        <aside className="upload-settings">
+          <div className="panel-label">Обработка</div>
+          <ModePicker
+            config={config}
+            value={mode}
+            onChange={setMode}
+            disabled={progress !== null}
+          />
+          {mode === "demo" && <DemoNotice />}
+          <div className="export-specs">
+            <h2>Формат результата</h2>
+            <dl>
+              <div>
+                <dt>Контейнер</dt>
+                <dd>MP4 · H.264</dd>
+              </div>
+              <div>
+                <dt>Размер кадра</dt>
+                <dd>540 × 960</dd>
+              </div>
+              <div>
+                <dt>Длительность</dt>
+                <dd>{config.min_clip_seconds}–{config.max_clip_seconds} сек.</dd>
+              </div>
+            </dl>
           </div>
-        )}
-      </div>
-      {error && (
-        <p className="error-message" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="workflow">
-        <div>
-          <span className="step-number">01</span>
-          <h3>
-            {montage
-              ? "Анализ кадров"
-              : mode === "openai"
-                ? "Речь в текст"
-                : mode === "split"
-                  ? "Проверка видео"
-                  : "Тестовый текст"}
-          </h3>
-          <p>
-            {montage
-              ? "Оцениваем сцены, движение и композицию."
-              : mode === "openai"
-                ? "Расшифровка с временными метками."
-                : mode === "split"
-                  ? `Исходник от ${config.min_video_seconds ?? 15} секунд. Распознавание речи не требуется.`
-                  : "Готовая расшифровка для проверки субтитров."}
-          </p>
-        </div>
-        <div>
-          <span className="step-number">02</span>
-          <h3>
-            {montage
-              ? "Несколько вариантов"
-              : mode === "openai"
-                ? "Выбор по смыслу"
-                : "3 фрагмента по времени"}
-          </h3>
-          <p>
-            {montage
-              ? "Разный темп, выбор и порядок моментов."
-              : `Длина фрагмента: ${config.min_clip_seconds}–${config.max_clip_seconds} секунд.`}
-          </p>
-        </div>
-        <div>
-          <span className="step-number">03</span>
-          <h3>Готовый MP4</h3>
-          <p>
-            {montage
-              ? "Склеенные сцены, исходный звук. Каждый вариант можно скачать."
-              : "Формат 9:16. Границы можно изменить."}
-          </p>
-        </div>
+        </aside>
       </div>
       <p className="upload-footnote">
         <Icon name="film" size={16} />{" "}

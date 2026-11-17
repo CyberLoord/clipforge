@@ -177,7 +177,7 @@ export function JobDetail({
     <div className="job-detail">
       <div className="job-heading">
         <div>
-          <div className="eyebrow">ИСХОДНОЕ ВИДЕО</div>
+          <div className="eyebrow">Исходный файл</div>
           <h1 title={job.filename}>{job.filename}</h1>
           <p className="job-meta">
             {created}
@@ -280,7 +280,7 @@ export function JobDetail({
       {!active && (
         <section className="reprocess-panel">
           <div className="reprocess-heading">
-            <p>Создать эдиты из сохранённого видео</p>
+            <p>Исходник сохранён. Можно изменить режим обработки.</p>
             <button
               className="button secondary small"
               onClick={() => setReprocessing(!reprocessing)}
@@ -341,7 +341,7 @@ export function JobDetail({
             <h2>
               {montage ? "Варианты эдита" : "Фрагменты"}{" "}
               <span className="count">
-                {clips.length.toString().padStart(2, "0")}
+                {clips.length}
               </span>
             </h2>
             <p>
